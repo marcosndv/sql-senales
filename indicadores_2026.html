@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Indicadores Mensuales 2026 - ERP Señales</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 24px; background: #f5f6f8; color: #222; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 0 0 12px; color: #333; }
+  h3 { font-size: 13px; margin: 16px 0 8px; color: #555; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .warn { background: #fff5e1; border-left: 3px solid #e67e22; padding: 8px 12px; font-size: 12px; color: #7a4d00; margin-bottom: 16px; border-radius: 0 4px 4px 0; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .kpi { background: #fff; padding: 14px 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .kpi .label { font-size: 11px; color: #777; text-transform: uppercase; letter-spacing: 0.5px; }
+  .kpi .value { font-size: 24px; font-weight: 600; margin-top: 4px; }
+  .kpi .sub { font-size: 12px; color: #888; margin-top: 2px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .card { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .card-wide { grid-column: 1 / -1; }
+  canvas { max-height: 320px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #fafafa; font-weight: 600; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.total { font-weight: 700; background: #f7f7f9; border-top: 2px solid #ccc; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 2px solid #eee; }
+  .tab { padding: 8px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; font-size: 13px; color: #777; }
+  .tab.active { color: #2980b9; border-color: #2980b9; font-weight: 600; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>Indicadores Mensuales 2026 - ERP Señales</h1>
+<div class="subtitle">Datos enero a mayo 2026 · Fuentes: <code>vw_Sueldos_NominaMensual_Estable</code> + <code>vw_Sueldos_CostoEmpresaMensual</code> + <code>vw_Sueldos_Nomina_Activa_Detallada</code> · Generado: 10/06/2026</div>
+
+<div class="warn">
+  <strong>Notas de calidad de dato:</strong>
+  Costo Empresa de ene/feb 2026 está <b>subestimado</b> — la tabla <code>SUELDOS_CONTRIBUCIONESXEMPLEADO</code> solo está poblada desde marzo 2026 en adelante.
+  Las contribuciones de liquidaciones finales (CLASE=5) están excluidas para que el costo sea "recurrente".
+  "Acuerdo No Remunerativo" se excluye cuando el empleado ya tiene baja inferida (heurística cuota-despido vs paritaria).
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="grid">
+  <div class="card card-wide">
+    <h2>Evolución de la Nómina mensual (consolidado)</h2>
+    <canvas id="chartNomina"></canvas>
+  </div>
+
+  <div class="card card-wide">
+    <h2>Evolución del Costo Empresa mensual (por componente)</h2>
+    <canvas id="chartCosto"></canvas>
+  </div>
+
+  <div class="card card-wide">
+    <h2>Detalle mensual por dimensión</h2>
+    <div class="tabs">
+      <div class="tab active" data-tab="suc-nomina">Nómina por Sucursal</div>
+      <div class="tab" data-tab="suc-costo">Costo por Sucursal</div>
+      <div class="tab" data-tab="cc-costo">Costo por Centro de Costo</div>
+    </div>
+    <div id="suc-nomina" class="tab-panel active"></div>
+    <div id="suc-costo" class="tab-panel"></div>
+    <div id="cc-costo" class="tab-panel"></div>
+  </div>
+
+  <div class="card card-wide">
+    <h2>Nómina actualizada a mayo 2026 - por Sucursal × Cocina/Servicio/Otros</h2>
+    <canvas id="chartSucTipo"></canvas>
+    <h3>Detalle</h3>
+    <table id="tablaSucTipo">
+      <thead><tr><th>Sucursal</th><th>Empresa</th><th class="num">Cocina</th><th class="num">Servicio</th><th class="num">Otros</th><th class="num">Total</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// DATOS (snapshot 10/06/2026)
+// ============================================================================
+const dotacionMensual = [
+  {"periodo":"202601","mes":"Ene 2026","dotacion":518},
+  {"periodo":"202602","mes":"Feb 2026","dotacion":515},
+  {"periodo":"202603","mes":"Mar 2026","dotacion":497},
+  {"periodo":"202604","mes":"Abr 2026","dotacion":500},
+  {"periodo":"202605","mes":"May 2026","dotacion":477}
+];
+
+const dotacionPorSucursal = [{"Periodo":"202601","NombreSucursal":"ADMINISTRACIÓN","Dotacion":15},{"Periodo":"202601","NombreSucursal":"AEROPUERTO","Dotacion":1},{"Periodo":"202601","NombreSucursal":"ANDESMAR","Dotacion":3},{"Periodo":"202601","NombreSucursal":"BURR 22","Dotacion":62},{"Periodo":"202601","NombreSucursal":"CASA VIGIL MAIPÚ","Dotacion":201},{"Periodo":"202601","NombreSucursal":"CASA VIGIL PALMARES","Dotacion":5},{"Periodo":"202601","NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Dotacion":9},{"Periodo":"202601","NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Dotacion":20},{"Periodo":"202601","NombreSucursal":"CHACHINGO PALMARES","Dotacion":45},{"Periodo":"202601","NombreSucursal":"CHIPIRONES S. A. S.","Dotacion":24},{"Periodo":"202601","NombreSucursal":"DESINFORMADOS S.A.S","Dotacion":1},{"Periodo":"202601","NombreSucursal":"IL MERCATO","Dotacion":24},{"Periodo":"202601","NombreSucursal":"LOSANCE SA","Dotacion":1},{"Periodo":"202601","NombreSucursal":"MIL SUELOS","Dotacion":6},{"Periodo":"202601","NombreSucursal":"NSL S.R.L.","Dotacion":4},{"Periodo":"202601","NombreSucursal":"PUERTO ESTANCIA S. A. S.","Dotacion":2},{"Periodo":"202601","NombreSucursal":"PULTUN SAS","Dotacion":8},{"Periodo":"202601","NombreSucursal":"REPÚBLICA","Dotacion":72},{"Periodo":"202601","NombreSucursal":"RIVADAVIA 122 PB OF 9","Dotacion":15},{"Periodo":"202602","NombreSucursal":"ADMINISTRACIÓN","Dotacion":17},{"Periodo":"202602","NombreSucursal":"AEROPUERTO","Dotacion":1},{"Periodo":"202602","NombreSucursal":"ANDESMAR","Dotacion":3},{"Periodo":"202602","NombreSucursal":"BURR 22","Dotacion":67},{"Periodo":"202602","NombreSucursal":"CASA VIGIL MAIPÚ","Dotacion":191},{"Periodo":"202602","NombreSucursal":"CASA VIGIL PALMARES","Dotacion":4},{"Periodo":"202602","NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Dotacion":9},{"Periodo":"202602","NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Dotacion":19},{"Periodo":"202602","NombreSucursal":"CHACHINGO PALMARES","Dotacion":46},{"Periodo":"202602","NombreSucursal":"CHIPIRONES S. A. S.","Dotacion":23},{"Periodo":"202602","NombreSucursal":"DESINFORMADOS S.A.S","Dotacion":1},{"Periodo":"202602","NombreSucursal":"IL MERCATO","Dotacion":23},{"Periodo":"202602","NombreSucursal":"LOSANCE SA","Dotacion":1},{"Periodo":"202602","NombreSucursal":"MIL SUELOS","Dotacion":7},{"Periodo":"202602","NombreSucursal":"NSL S.R.L.","Dotacion":4},{"Periodo":"202602","NombreSucursal":"PUERTO ESTANCIA S. A. S.","Dotacion":2},{"Periodo":"202602","NombreSucursal":"PULTUN SAS","Dotacion":8},{"Periodo":"202602","NombreSucursal":"REPÚBLICA","Dotacion":74},{"Periodo":"202602","NombreSucursal":"RIVADAVIA 122 PB OF 9","Dotacion":15},{"Periodo":"202603","NombreSucursal":"ADMINISTRACIÓN","Dotacion":17},{"Periodo":"202603","NombreSucursal":"AEROPUERTO","Dotacion":1},{"Periodo":"202603","NombreSucursal":"ANDESMAR","Dotacion":3},{"Periodo":"202603","NombreSucursal":"BURR 22","Dotacion":64},{"Periodo":"202603","NombreSucursal":"CASA VIGIL MAIPÚ","Dotacion":190},{"Periodo":"202603","NombreSucursal":"CASA VIGIL PALMARES","Dotacion":4},{"Periodo":"202603","NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Dotacion":9},{"Periodo":"202603","NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Dotacion":19},{"Periodo":"202603","NombreSucursal":"CHACHINGO PALMARES","Dotacion":47},{"Periodo":"202603","NombreSucursal":"CHIPIRONES S. A. S.","Dotacion":21},{"Periodo":"202603","NombreSucursal":"DESINFORMADOS S.A.S","Dotacion":1},{"Periodo":"202603","NombreSucursal":"IL MERCATO","Dotacion":22},{"Periodo":"202603","NombreSucursal":"LOSANCE SA","Dotacion":1},{"Periodo":"202603","NombreSucursal":"MIL SUELOS","Dotacion":6},{"Periodo":"202603","NombreSucursal":"NSL S.R.L.","Dotacion":4},{"Periodo":"202603","NombreSucursal":"PUERTO ESTANCIA S. A. S.","Dotacion":2},{"Periodo":"202603","NombreSucursal":"PULTUN SAS","Dotacion":8},{"Periodo":"202603","NombreSucursal":"REPÚBLICA","Dotacion":63},{"Periodo":"202603","NombreSucursal":"RIVADAVIA 122 PB OF 9","Dotacion":15},{"Periodo":"202604","NombreSucursal":"ADMINISTRACIÓN","Dotacion":17},{"Periodo":"202604","NombreSucursal":"ANDESMAR","Dotacion":3},{"Periodo":"202604","NombreSucursal":"BURR 22","Dotacion":70},{"Periodo":"202604","NombreSucursal":"CASA VIGIL MAIPÚ","Dotacion":186},{"Periodo":"202604","NombreSucursal":"CASA VIGIL PALMARES","Dotacion":4},{"Periodo":"202604","NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Dotacion":9},{"Periodo":"202604","NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Dotacion":19},{"Periodo":"202604","NombreSucursal":"CHACHINGO PALMARES","Dotacion":48},{"Periodo":"202604","NombreSucursal":"CHIPIRONES S. A. S.","Dotacion":21},{"Periodo":"202604","NombreSucursal":"DESINFORMADOS S.A.S","Dotacion":1},{"Periodo":"202604","NombreSucursal":"IL MERCATO","Dotacion":21},{"Periodo":"202604","NombreSucursal":"LOSANCE SA","Dotacion":1},{"Periodo":"202604","NombreSucursal":"MIL SUELOS","Dotacion":6},{"Periodo":"202604","NombreSucursal":"NSL S.R.L.","Dotacion":4},{"Periodo":"202604","NombreSucursal":"PUERTO ESTANCIA S. A. S.","Dotacion":2},{"Periodo":"202604","NombreSucursal":"PULTUN SAS","Dotacion":9},{"Periodo":"202604","NombreSucursal":"REPÚBLICA","Dotacion":64},{"Periodo":"202604","NombreSucursal":"RIVADAVIA 122 PB OF 9","Dotacion":15},{"Periodo":"202605","NombreSucursal":"ADMINISTRACIÓN","Dotacion":15},{"Periodo":"202605","NombreSucursal":"ANDESMAR","Dotacion":3},{"Periodo":"202605","NombreSucursal":"BURR 22","Dotacion":61},{"Periodo":"202605","NombreSucursal":"CASA VIGIL MAIPÚ","Dotacion":177},{"Periodo":"202605","NombreSucursal":"CASA VIGIL PALMARES","Dotacion":4},{"Periodo":"202605","NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Dotacion":9},{"Periodo":"202605","NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Dotacion":19},{"Periodo":"202605","NombreSucursal":"CHACHINGO PALMARES","Dotacion":48},{"Periodo":"202605","NombreSucursal":"CHIPIRONES S. A. S.","Dotacion":22},{"Periodo":"202605","NombreSucursal":"IL MERCATO","Dotacion":19},{"Periodo":"202605","NombreSucursal":"MIL SUELOS","Dotacion":6},{"Periodo":"202605","NombreSucursal":"NSL S.R.L.","Dotacion":4},{"Periodo":"202605","NombreSucursal":"PULTUN SAS","Dotacion":11},{"Periodo":"202605","NombreSucursal":"REPÚBLICA","Dotacion":64},{"Periodo":"202605","NombreSucursal":"RIVADAVIA 122 PB OF 9","Dotacion":15}];
+
+const costoPorCategoria = [{"Periodo":"202601","Categoria":"HABER_REMUN","Costo":692695474},{"Periodo":"202601","Categoria":"NO_REMUN","Costo":633686},{"Periodo":"202601","Categoria":"SAC","Costo":710872},{"Periodo":"202602","Categoria":"HABER_REMUN","Costo":730882061},{"Periodo":"202602","Categoria":"NO_REMUN","Costo":2638983},{"Periodo":"202602","Categoria":"SAC","Costo":5031751},{"Periodo":"202603","Categoria":"CONTRIBUCION_PATRONAL","Costo":162865673},{"Periodo":"202603","Categoria":"HABER_REMUN","Costo":689676805},{"Periodo":"202603","Categoria":"NO_REMUN","Costo":3226041},{"Periodo":"202603","Categoria":"SAC","Costo":2527998},{"Periodo":"202604","Categoria":"CONTRIBUCION_PATRONAL","Costo":175122552},{"Periodo":"202604","Categoria":"HABER_REMUN","Costo":727938957},{"Periodo":"202604","Categoria":"NO_REMUN","Costo":302915},{"Periodo":"202604","Categoria":"SAC","Costo":9800712},{"Periodo":"202605","Categoria":"CONTRIBUCION_PATRONAL","Costo":171091077},{"Periodo":"202605","Categoria":"HABER_REMUN","Costo":707691759},{"Periodo":"202605","Categoria":"NO_REMUN","Costo":29649849},{"Periodo":"202605","Categoria":"SAC","Costo":7837635}];
+
+const costoPorSucursal = [{"Periodo":"202601","NombreSucursal":"ADMINISTRACIÓN","Costo":28972088},{"Periodo":"202601","NombreSucursal":"AEROPUERTO","Costo":655828},{"Periodo":"202601","NombreSucursal":"ANDESMAR","Costo":3651661},{"Periodo":"202601","NombreSucursal":"BURR 22","Costo":88091851},{"Periodo":"202601","NombreSucursal":"CASA VIGIL MAIPÚ","Costo":289309682},{"Periodo":"202601","NombreSucursal":"CASA VIGIL PALMARES","Costo":7377765},{"Periodo":"202601","NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Costo":14636272},{"Periodo":"202601","NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Costo":29612591},{"Periodo":"202601","NombreSucursal":"CHACHINGO PALMARES","Costo":51214729},{"Periodo":"202601","NombreSucursal":"CHIPIRONES S. A. S.","Costo":27500497},{"Periodo":"202601","NombreSucursal":"DESINFORMADOS S.A.S","Costo":100000},{"Periodo":"202601","NombreSucursal":"IL MERCATO","Costo":32995797},{"Periodo":"202601","NombreSucursal":"LOSANCE SA","Costo":1932954},{"Periodo":"202601","NombreSucursal":"MIL SUELOS","Costo":10101956},{"Periodo":"202601","NombreSucursal":"NSL S.R.L.","Costo":3484454},{"Periodo":"202601","NombreSucursal":"PUERTO ESTANCIA S. A. S.","Costo":1412026},{"Periodo":"202601","NombreSucursal":"PULTUN SAS","Costo":12232811},{"Periodo":"202601","NombreSucursal":"REPÚBLICA","Costo":70159347},{"Periodo":"202601","NombreSucursal":"RIVADAVIA 122 PB OF 9","Costo":20597725},{"Periodo":"202602","NombreSucursal":"ADMINISTRACIÓN","Costo":35248496},{"Periodo":"202602","NombreSucursal":"AEROPUERTO","Costo":0},{"Periodo":"202602","NombreSucursal":"ANDESMAR","Costo":3913655},{"Periodo":"202602","NombreSucursal":"BURR 22","Costo":91863207},{"Periodo":"202602","NombreSucursal":"CASA VIGIL MAIPÚ","Costo":308895701},{"Periodo":"202602","NombreSucursal":"CASA VIGIL PALMARES","Costo":7391556},{"Periodo":"202602","NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Costo":14529173},{"Periodo":"202602","NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Costo":32413296},{"Periodo":"202602","NombreSucursal":"CHACHINGO PALMARES","Costo":53660394},{"Periodo":"202602","NombreSucursal":"CHIPIRONES S. A. S.","Costo":26886645},{"Periodo":"202602","NombreSucursal":"DESINFORMADOS S.A.S","Costo":100000},{"Periodo":"202602","NombreSucursal":"IL MERCATO","Costo":32890446},{"Periodo":"202602","NombreSucursal":"LOSANCE SA","Costo":1921855},{"Periodo":"202602","NombreSucursal":"MIL SUELOS","Costo":9740406},{"Periodo":"202602","NombreSucursal":"NSL S.R.L.","Costo":4591408},{"Periodo":"202602","NombreSucursal":"PUERTO ESTANCIA S. A. S.","Costo":1372520},{"Periodo":"202602","NombreSucursal":"PULTUN SAS","Costo":12219276},{"Periodo":"202602","NombreSucursal":"REPÚBLICA","Costo":79972832},{"Periodo":"202602","NombreSucursal":"RIVADAVIA 122 PB OF 9","Costo":20941928},{"Periodo":"202603","NombreSucursal":"ADMINISTRACIÓN","Costo":42947875},{"Periodo":"202603","NombreSucursal":"AEROPUERTO","Costo":928704},{"Periodo":"202603","NombreSucursal":"ANDESMAR","Costo":4869364},{"Periodo":"202603","NombreSucursal":"BURR 22","Costo":105264849},{"Periodo":"202603","NombreSucursal":"CASA VIGIL MAIPÚ","Costo":361802461},{"Periodo":"202603","NombreSucursal":"CASA VIGIL PALMARES","Costo":9169000},{"Periodo":"202603","NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Costo":17348962},{"Periodo":"202603","NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Costo":37994932},{"Periodo":"202603","NombreSucursal":"CHACHINGO PALMARES","Costo":55389879},{"Periodo":"202603","NombreSucursal":"CHIPIRONES S. A. S.","Costo":29630923},{"Periodo":"202603","NombreSucursal":"DESINFORMADOS S.A.S","Costo":100000},{"Periodo":"202603","NombreSucursal":"IL MERCATO","Costo":41546293},{"Periodo":"202603","NombreSucursal":"LOSANCE SA","Costo":2401774},{"Periodo":"202603","NombreSucursal":"MIL SUELOS","Costo":12179116},{"Periodo":"202603","NombreSucursal":"NSL S.R.L.","Costo":5152346},{"Periodo":"202603","NombreSucursal":"PUERTO ESTANCIA S. A. S.","Costo":1293508},{"Periodo":"202603","NombreSucursal":"PULTUN SAS","Costo":12511428},{"Periodo":"202603","NombreSucursal":"REPÚBLICA","Costo":91236987},{"Periodo":"202603","NombreSucursal":"RIVADAVIA 122 PB OF 9","Costo":26528115},{"Periodo":"202604","NombreSucursal":"ADMINISTRACIÓN","Costo":44385666},{"Periodo":"202604","NombreSucursal":"ANDESMAR","Costo":4661402},{"Periodo":"202604","NombreSucursal":"BURR 22","Costo":116217518},{"Periodo":"202604","NombreSucursal":"CASA VIGIL MAIPÚ","Costo":377720988},{"Periodo":"202604","NombreSucursal":"CASA VIGIL PALMARES","Costo":9605395},{"Periodo":"202604","NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Costo":18797153},{"Periodo":"202604","NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Costo":40307816},{"Periodo":"202604","NombreSucursal":"CHACHINGO PALMARES","Costo":67006975},{"Periodo":"202604","NombreSucursal":"CHIPIRONES S. A. S.","Costo":33014238},{"Periodo":"202604","NombreSucursal":"DESINFORMADOS S.A.S","Costo":102062},{"Periodo":"202604","NombreSucursal":"IL MERCATO","Costo":41818981},{"Periodo":"202604","NombreSucursal":"LOSANCE SA","Costo":2401787},{"Periodo":"202604","NombreSucursal":"MIL SUELOS","Costo":13004221},{"Periodo":"202604","NombreSucursal":"NSL S.R.L.","Costo":5152398},{"Periodo":"202604","NombreSucursal":"PUERTO ESTANCIA S. A. S.","Costo":1592894},{"Periodo":"202604","NombreSucursal":"PULTUN SAS","Costo":15631825},{"Periodo":"202604","NombreSucursal":"REPÚBLICA","Costo":96088709},{"Periodo":"202604","NombreSucursal":"RIVADAVIA 122 PB OF 9","Costo":25655111},{"Periodo":"202605","NombreSucursal":"ADMINISTRACIÓN","Costo":37289997},{"Periodo":"202605","NombreSucursal":"ANDESMAR","Costo":6012154},{"Periodo":"202605","NombreSucursal":"BURR 22","Costo":120014070},{"Periodo":"202605","NombreSucursal":"CASA VIGIL MAIPÚ","Costo":382615503},{"Periodo":"202605","NombreSucursal":"CASA VIGIL PALMARES","Costo":9593062},{"Periodo":"202605","NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Costo":18980156},{"Periodo":"202605","NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Costo":42693694},{"Periodo":"202605","NombreSucursal":"CHACHINGO PALMARES","Costo":66497621},{"Periodo":"202605","NombreSucursal":"CHIPIRONES S. A. S.","Costo":32666652},{"Periodo":"202605","NombreSucursal":"IL MERCATO","Costo":39976510},{"Periodo":"202605","NombreSucursal":"MIL SUELOS","Costo":12281295},{"Periodo":"202605","NombreSucursal":"NSL S.R.L.","Costo":5157148},{"Periodo":"202605","NombreSucursal":"PULTUN SAS","Costo":19600595},{"Periodo":"202605","NombreSucursal":"REPÚBLICA","Costo":97554199},{"Periodo":"202605","NombreSucursal":"RIVADAVIA 122 PB OF 9","Costo":25337667}];
+
+// Costo por Centro de Costo — top 20 por costo acumulado ene-may
+const costoPorCC = [{"Periodo":"202601","NombresCentroCosto":"ADMINISTRACION","Costo":20755735},{"Periodo":"202601","NombresCentroCosto":"ANGELICA","Costo":54715758},{"Periodo":"202601","NombresCentroCosto":"CHACHINGO ARISTIDES","Costo":20772057},{"Periodo":"202601","NombresCentroCosto":"CHACHINGO CIRCUITO","Costo":12323331},{"Periodo":"202601","NombresCentroCosto":"CHACHINGO DALVIAN","Costo":19776989},{"Periodo":"202601","NombresCentroCosto":"CHACHINGO LUJAN","Costo":15650293},{"Periodo":"202601","NombresCentroCosto":"CHACHINGO PALMARES","Costo":21106110},{"Periodo":"202601","NombresCentroCosto":"CHIPIRON PALMARES","Costo":16103301},{"Periodo":"202601","NombresCentroCosto":"CHIPIRON PLANTA 1","Costo":17439004},{"Periodo":"202601","NombresCentroCosto":"COMPRAS","Costo":10774059},{"Periodo":"202601","NombresCentroCosto":"CV MAIPU BODEGA","Costo":156031969},{"Periodo":"202601","NombresCentroCosto":"CV PALMARES","Costo":30462223},{"Periodo":"202601","NombresCentroCosto":"DISTRIBUIDORA","Costo":13421843},{"Periodo":"202601","NombresCentroCosto":"LOGISTICA","Costo":19349465},{"Periodo":"202601","NombresCentroCosto":"MANTENIMIENTO","Costo":13394816},{"Periodo":"202601","NombresCentroCosto":"PULTUM","Costo":12232811},{"Periodo":"202601","NombresCentroCosto":"REPUBLICA PALMARES","Costo":17067837},{"Periodo":"202601","NombresCentroCosto":"RESERVAS","Costo":14498732},{"Periodo":"202601","NombresCentroCosto":"SUPERVISION GASTRONOMIA","Costo":9471686},{"Periodo":"202601","NombresCentroCosto":"VIGIL WINE CLUB PLUMERILLO","Costo":24075061},{"Periodo":"202602","NombresCentroCosto":"ADMINISTRACION","Costo":22191849},{"Periodo":"202602","NombresCentroCosto":"ANGELICA","Costo":58014607},{"Periodo":"202602","NombresCentroCosto":"CHACHINGO ARISTIDES","Costo":21493113},{"Periodo":"202602","NombresCentroCosto":"CHACHINGO CIRCUITO","Costo":14175659},{"Periodo":"202602","NombresCentroCosto":"CHACHINGO DALVIAN","Costo":22044407},{"Periodo":"202602","NombresCentroCosto":"CHACHINGO LUJAN","Costo":16116659},{"Periodo":"202602","NombresCentroCosto":"CHACHINGO PALMARES","Costo":22815754},{"Periodo":"202602","NombresCentroCosto":"CHIPIRON PALMARES","Costo":16850309},{"Periodo":"202602","NombresCentroCosto":"CHIPIRON PLANTA 1","Costo":15877252},{"Periodo":"202602","NombresCentroCosto":"COMPRAS","Costo":12265983},{"Periodo":"202602","NombresCentroCosto":"CV MAIPU BODEGA","Costo":170198645},{"Periodo":"202602","NombresCentroCosto":"CV PALMARES","Costo":32860275},{"Periodo":"202602","NombresCentroCosto":"DISTRIBUIDORA","Costo":13572162},{"Periodo":"202602","NombresCentroCosto":"LOGISTICA","Costo":19699893},{"Periodo":"202602","NombresCentroCosto":"MANTENIMIENTO","Costo":13355416},{"Periodo":"202602","NombresCentroCosto":"PULTUM","Costo":12219276},{"Periodo":"202602","NombresCentroCosto":"REPUBLICA PALMARES","Costo":18339180},{"Periodo":"202602","NombresCentroCosto":"RESERVAS","Costo":14632240},{"Periodo":"202602","NombresCentroCosto":"SUPERVISION GASTRONOMIA","Costo":9574900},{"Periodo":"202602","NombresCentroCosto":"VIGIL WINE CLUB PLUMERILLO","Costo":25336804},{"Periodo":"202603","NombresCentroCosto":"ADMINISTRACION","Costo":30990477},{"Periodo":"202603","NombresCentroCosto":"ANGELICA","Costo":76660087},{"Periodo":"202603","NombresCentroCosto":"CHACHINGO ARISTIDES","Costo":25229131},{"Periodo":"202603","NombresCentroCosto":"CHACHINGO CIRCUITO","Costo":17814944},{"Periodo":"202603","NombresCentroCosto":"CHACHINGO DALVIAN","Costo":23619529},{"Periodo":"202603","NombresCentroCosto":"CHACHINGO LUJAN","Costo":18430856},{"Periodo":"202603","NombresCentroCosto":"CHACHINGO PALMARES","Costo":26833813},{"Periodo":"202603","NombresCentroCosto":"CHIPIRON PALMARES","Costo":19687047},{"Periodo":"202603","NombresCentroCosto":"CHIPIRON PLANTA 1","Costo":18838786},{"Periodo":"202603","NombresCentroCosto":"COMPRAS","Costo":15920903},{"Periodo":"202603","NombresCentroCosto":"CV MAIPU BODEGA","Costo":207536165},{"Periodo":"202603","NombresCentroCosto":"CV PALMARES","Costo":39697515},{"Periodo":"202603","NombresCentroCosto":"DISTRIBUIDORA","Costo":17147902},{"Periodo":"202603","NombresCentroCosto":"LOGISTICA","Costo":24240850},{"Periodo":"202603","NombresCentroCosto":"MANTENIMIENTO","Costo":16017997},{"Periodo":"202603","NombresCentroCosto":"PULTUM","Costo":12511428},{"Periodo":"202603","NombresCentroCosto":"REPUBLICA PALMARES","Costo":24077570},{"Periodo":"202603","NombresCentroCosto":"RESERVAS","Costo":17527460},{"Periodo":"202603","NombresCentroCosto":"SUPERVISION GASTRONOMIA","Costo":12026700},{"Periodo":"202603","NombresCentroCosto":"VIGIL WINE CLUB PLUMERILLO","Costo":31196732},{"Periodo":"202604","NombresCentroCosto":"ADMINISTRACION","Costo":32660399},{"Periodo":"202604","NombresCentroCosto":"ANGELICA","Costo":80112145},{"Periodo":"202604","NombresCentroCosto":"CHACHINGO ARISTIDES","Costo":28235049},{"Periodo":"202604","NombresCentroCosto":"CHACHINGO CIRCUITO","Costo":17301296},{"Periodo":"202604","NombresCentroCosto":"CHACHINGO DALVIAN","Costo":27285948},{"Periodo":"202604","NombresCentroCosto":"CHACHINGO LUJAN","Costo":21242890},{"Periodo":"202604","NombresCentroCosto":"CHACHINGO PALMARES","Costo":28673894},{"Periodo":"202604","NombresCentroCosto":"CHIPIRON PALMARES","Costo":21330391},{"Periodo":"202604","NombresCentroCosto":"CHIPIRON PLANTA 1","Costo":21000876},{"Periodo":"202604","NombresCentroCosto":"COMPRAS","Costo":16403204},{"Periodo":"202604","NombresCentroCosto":"CV MAIPU BODEGA","Costo":223910983},{"Periodo":"202604","NombresCentroCosto":"CV PALMARES","Costo":41868744},{"Periodo":"202604","NombresCentroCosto":"DISTRIBUIDORA","Costo":16822398},{"Periodo":"202604","NombresCentroCosto":"LOGISTICA","Costo":24356515},{"Periodo":"202604","NombresCentroCosto":"MANTENIMIENTO","Costo":17745231},{"Periodo":"202604","NombresCentroCosto":"PULTUM","Costo":15631825},{"Periodo":"202604","NombresCentroCosto":"REPUBLICA PALMARES","Costo":24080850},{"Periodo":"202604","NombresCentroCosto":"RESERVAS","Costo":19470040},{"Periodo":"202604","NombresCentroCosto":"SUPERVISION GASTRONOMIA","Costo":13301435},{"Periodo":"202604","NombresCentroCosto":"VIGIL WINE CLUB PLUMERILLO","Costo":32764500},{"Periodo":"202605","NombresCentroCosto":"ADMINISTRACION","Costo":26501669},{"Periodo":"202605","NombresCentroCosto":"ANGELICA","Costo":82078907},{"Periodo":"202605","NombresCentroCosto":"CHACHINGO ARISTIDES","Costo":31278142},{"Periodo":"202605","NombresCentroCosto":"CHACHINGO CIRCUITO","Costo":16926379},{"Periodo":"202605","NombresCentroCosto":"CHACHINGO DALVIAN","Costo":25586432},{"Periodo":"202605","NombresCentroCosto":"CHACHINGO LUJAN","Costo":20765372},{"Periodo":"202605","NombresCentroCosto":"CHACHINGO PALMARES","Costo":29495707},{"Periodo":"202605","NombresCentroCosto":"CHIPIRON PALMARES","Costo":20733965},{"Periodo":"202605","NombresCentroCosto":"CHIPIRON PLANTA 1","Costo":21525292},{"Periodo":"202605","NombresCentroCosto":"COMPRAS","Costo":13270926},{"Periodo":"202605","NombresCentroCosto":"CV MAIPU BODEGA","Costo":225247619},{"Periodo":"202605","NombresCentroCosto":"CV PALMARES","Costo":39247866},{"Periodo":"202605","NombresCentroCosto":"DISTRIBUIDORA","Costo":17831725},{"Periodo":"202605","NombresCentroCosto":"LOGISTICA","Costo":36927259},{"Periodo":"202605","NombresCentroCosto":"MANTENIMIENTO","Costo":17500717},{"Periodo":"202605","NombresCentroCosto":"PULTUM","Costo":19600595},{"Periodo":"202605","NombresCentroCosto":"REPUBLICA PALMARES","Costo":24817398},{"Periodo":"202605","NombresCentroCosto":"RESERVAS","Costo":18376542},{"Periodo":"202605","NombresCentroCosto":"SUPERVISION GASTRONOMIA","Costo":14138282},{"Periodo":"202605","NombresCentroCosto":"VIGIL WINE CLUB PLUMERILLO","Costo":33415354}];
+
+const nominaSucursalTipo = [{"NombreSucursal":"ADMINISTRACIÓN","Empresa":"EMPR0001","Cocina":0,"Servicio":0,"Otros":15,"Total":15},{"NombreSucursal":"ANDESMAR","Empresa":"EMPR0001","Cocina":0,"Servicio":0,"Otros":2,"Total":2},{"NombreSucursal":"BURR 22","Empresa":"EMPR0006","Cocina":25,"Servicio":26,"Otros":6,"Total":57},{"NombreSucursal":"CASA VIGIL MAIPÚ","Empresa":"EMPR0001","Cocina":47,"Servicio":78,"Otros":50,"Total":175},{"NombreSucursal":"CASA VIGIL PALMARES","Empresa":"EMPR0001","Cocina":2,"Servicio":1,"Otros":1,"Total":4},{"NombreSucursal":"CHACHINGO CRAFT BEER ARÍSTIDES","Empresa":"Empr0002","Cocina":3,"Servicio":3,"Otros":3,"Total":9},{"NombreSucursal":"CHACHINGO CRAFT BEER FÁBRICA","Empresa":"Empr0002","Cocina":4,"Servicio":8,"Otros":7,"Total":19},{"NombreSucursal":"CHACHINGO PALMARES","Empresa":"Empr0002","Cocina":31,"Servicio":14,"Otros":2,"Total":47},{"NombreSucursal":"CHIPIRONES S. A. S.","Empresa":"EMPR0013","Cocina":9,"Servicio":10,"Otros":3,"Total":22},{"NombreSucursal":"IL MERCATO","Empresa":"EMPR0001","Cocina":0,"Servicio":1,"Otros":0,"Total":1},{"NombreSucursal":"IL MERCATO","Empresa":"EMPR0005","Cocina":4,"Servicio":12,"Otros":2,"Total":18},{"NombreSucursal":"MIL SUELOS","Empresa":"EMPR0009","Cocina":2,"Servicio":3,"Otros":1,"Total":6},{"NombreSucursal":"NSL S.R.L.","Empresa":"EMPR0007","Cocina":0,"Servicio":0,"Otros":4,"Total":4},{"NombreSucursal":"PULTUN SAS","Empresa":"EMPR0010","Cocina":0,"Servicio":0,"Otros":10,"Total":10},{"NombreSucursal":"REPÚBLICA","Empresa":"EMPR0001","Cocina":1,"Servicio":2,"Otros":0,"Total":3},{"NombreSucursal":"REPÚBLICA","Empresa":"EMPR0005","Cocina":31,"Servicio":22,"Otros":7,"Total":60},{"NombreSucursal":"RIVADAVIA 122 PB OF 9","Empresa":"EMPR0003","Cocina":0,"Servicio":2,"Otros":13,"Total":15}];
+
+// ============================================================================
+// KPIs
+// ============================================================================
+const dotPromedio = Math.round(dotacionMensual.reduce((s,r) => s+r.dotacion, 0) / dotacionMensual.length);
+const costoTotal = costoPorCategoria.reduce((s,r) => s+r.Costo, 0);
+const totalActivos = nominaSucursalTipo.reduce((s,r) => s+r.Total, 0);
+const totalCocina = nominaSucursalTipo.reduce((s,r) => s+r.Cocina, 0);
+const totalServicio = nominaSucursalTipo.reduce((s,r) => s+r.Servicio, 0);
+const totalOtros = nominaSucursalTipo.reduce((s,r) => s+r.Otros, 0);
+
+const fmtMoney = (n) => new Intl.NumberFormat('es-AR', {style:'currency', currency:'ARS', maximumFractionDigits:0}).format(n);
+const fmtMM = (n) => '$' + (n/1000000).toLocaleString('es-AR', {maximumFractionDigits:1}) + ' M';
+const fmtInt = (n) => n.toLocaleString('es-AR');
+
+document.getElementById('kpis').innerHTML = [
+  {label: "Dotación promedio", value: fmtInt(dotPromedio), sub: "ene-may 2026"},
+  {label: "Costo Empresa total", value: fmtMM(costoTotal), sub: "ene-may 2026 (subest. ene/feb)"},
+  {label: "Costo promedio mensual", value: fmtMM(costoTotal/5), sub: "ene-may 2026"},
+  {label: "Activos a mayo", value: fmtInt(totalActivos), sub: "fuente única: liq mensual"},
+  {label: "Cocina", value: fmtInt(totalCocina), sub: Math.round(totalCocina/totalActivos*100) + "% del total"},
+  {label: "Servicio", value: fmtInt(totalServicio), sub: Math.round(totalServicio/totalActivos*100) + "% del total"},
+].map(k => `<div class="kpi"><div class="label">${k.label}</div><div class="value">${k.value}</div><div class="sub">${k.sub}</div></div>`).join('');
+
+// ============================================================================
+// CHART: Evolución dotación mensual
+// ============================================================================
+new Chart(document.getElementById('chartNomina'), {
+  type: 'bar',
+  data: {
+    labels: dotacionMensual.map(r => r.mes),
+    datasets: [{
+      label: 'Dotación',
+      data: dotacionMensual.map(r => r.dotacion),
+      backgroundColor: '#2980b9',
+      borderRadius: 4
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {legend: {display: false}, tooltip: {callbacks: {label: (ctx) => fmtInt(ctx.parsed.y) + ' empleados'}}},
+    scales: {y: {beginAtZero: false, title: {display: true, text: 'Empleados'}}}
+  }
+});
+
+// ============================================================================
+// CHART: Costo Empresa por componente (stacked)
+// ============================================================================
+const meses = ['202601','202602','202603','202604','202605'];
+const mesLabels = ['Ene 2026','Feb 2026','Mar 2026','Abr 2026','May 2026'];
+const cats = ['HABER_REMUN','SAC','NO_REMUN','CONTRIBUCION_PATRONAL'];
+const catColors = {'HABER_REMUN':'#2980b9','SAC':'#16a085','NO_REMUN':'#27ae60','CONTRIBUCION_PATRONAL':'#9b59b6'};
+const catLabels = {'HABER_REMUN':'Haberes remunerativos','SAC':'SAC','NO_REMUN':'No remunerativos','CONTRIBUCION_PATRONAL':'Contribuciones patronales'};
+
+new Chart(document.getElementById('chartCosto'), {
+  type: 'bar',
+  data: {
+    labels: mesLabels,
+    datasets: cats.map(c => ({
+      label: catLabels[c],
+      data: meses.map(p => (costoPorCategoria.find(r => r.Periodo===p && r.Categoria===c)?.Costo) || 0),
+      backgroundColor: catColors[c]
+    }))
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {legend: {position: 'bottom'}, tooltip: {callbacks: {label: (ctx) => ctx.dataset.label + ': ' + fmtMM(ctx.parsed.y)}}},
+    scales: {x: {stacked: true}, y: {stacked: true, ticks: {callback: (v) => fmtMM(v)}}}
+  }
+});
+
+// ============================================================================
+// CHART: Nómina por Sucursal × TipoTrabajo (stacked horizontal)
+// ============================================================================
+const sucOrdenadas = [...nominaSucursalTipo].sort((a,b) => b.Total - a.Total);
+const sucLabels = sucOrdenadas.map(r => r.NombreSucursal + ' (' + r.Empresa + ')');
+
+new Chart(document.getElementById('chartSucTipo'), {
+  type: 'bar',
+  data: {
+    labels: sucLabels,
+    datasets: [
+      {label: 'Cocina', data: sucOrdenadas.map(r => r.Cocina), backgroundColor: '#e67e22'},
+      {label: 'Servicio', data: sucOrdenadas.map(r => r.Servicio), backgroundColor: '#3498db'},
+      {label: 'Otros', data: sucOrdenadas.map(r => r.Otros), backgroundColor: '#95a5a6'},
+    ]
+  },
+  options: {
+    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+    plugins: {legend: {position: 'bottom'}},
+    scales: {x: {stacked: true, title: {display: true, text: 'Empleados activos'}}, y: {stacked: true}}
+  }
+});
+
+// ============================================================================
+// TABLA: Nómina por Sucursal × TipoTrabajo
+// ============================================================================
+const tbody = document.querySelector('#tablaSucTipo tbody');
+tbody.innerHTML = sucOrdenadas.map(r => `<tr>
+  <td>${r.NombreSucursal}</td><td>${r.Empresa}</td>
+  <td class="num">${r.Cocina}</td><td class="num">${r.Servicio}</td><td class="num">${r.Otros}</td>
+  <td class="num"><b>${r.Total}</b></td>
+</tr>`).join('') + `<tr class="total">
+  <td>TOTAL</td><td></td>
+  <td class="num">${totalCocina}</td><td class="num">${totalServicio}</td><td class="num">${totalOtros}</td>
+  <td class="num">${totalActivos}</td>
+</tr>`;
+
+// ============================================================================
+// TABLAS PIVOT por mes (Sucursal × Mes y CC × Mes)
+// ============================================================================
+function pivotMensual(data, dimKey, valKey, formatter) {
+  const dims = [...new Set(data.map(r => r[dimKey]))].sort();
+  let html = '<table><thead><tr><th>' + dimKey + '</th>';
+  meses.forEach(m => { html += '<th class="num">' + mesLabels[meses.indexOf(m)].split(' ')[0] + '</th>'; });
+  html += '<th class="num">Total</th></tr></thead><tbody>';
+  let totales = meses.map(() => 0);
+  let grandTotal = 0;
+  dims.forEach(d => {
+    let row = '<tr><td>' + d + '</td>';
+    let sum = 0;
+    meses.forEach((m,i) => {
+      const v = data.find(r => r.Periodo===m && r[dimKey]===d)?.[valKey] || 0;
+      row += '<td class="num">' + (v ? formatter(v) : '-') + '</td>';
+      totales[i] += v;
+      sum += v;
+    });
+    grandTotal += sum;
+    row += '<td class="num"><b>' + (sum ? formatter(sum) : '-') + '</b></td>';
+    row += '</tr>';
+    html += row;
+  });
+  html += '<tr class="total"><td>TOTAL</td>';
+  totales.forEach(t => { html += '<td class="num">' + formatter(t) + '</td>'; });
+  html += '<td class="num">' + formatter(grandTotal) + '</td></tr>';
+  html += '</tbody></table>';
+  return html;
+}
+
+document.getElementById('suc-nomina').innerHTML = pivotMensual(dotacionPorSucursal, 'NombreSucursal', 'Dotacion', fmtInt);
+document.getElementById('suc-costo').innerHTML = pivotMensual(costoPorSucursal, 'NombreSucursal', 'Costo', fmtMM);
+document.getElementById('cc-costo').innerHTML = pivotMensual(costoPorCC, 'NombresCentroCosto', 'Costo', fmtMM);
+
+// ============================================================================
+// Tabs
+// ============================================================================
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById(t.dataset.tab).classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>

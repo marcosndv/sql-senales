@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Rotación Personal 2026 - ERP Señales</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 24px; background: #f5f6f8; color: #222; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .kpi { background: #fff; padding: 14px 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .kpi .label { font-size: 11px; color: #777; text-transform: uppercase; letter-spacing: 0.5px; }
+  .kpi .value { font-size: 26px; font-weight: 600; margin-top: 4px; }
+  .kpi .sub { font-size: 12px; color: #888; margin-top: 2px; }
+  .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .card { background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .card h2 { font-size: 14px; margin: 0 0 12px; color: #333; }
+  .card-wide { grid-column: 1 / -1; }
+  canvas { max-height: 280px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #fafafa; font-weight: 600; color: #555; }
+  td.num { text-align: right; }
+  .neg { color: #c0392b; font-weight: 600; }
+  .pos { color: #27ae60; font-weight: 600; }
+  .pct-high { color: #e67e22; font-weight: 600; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>Rotación de Personal — 2026</h1>
+<div class="subtitle">Datos enero a mayo 2026 · Fuentes: <code>dbo.Sueldos_Altas</code>, <code>dbo.Sueldos_Bajas</code> · Generado: 10/06/2026</div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="grid">
+  <div class="card card-wide">
+    <h2>Dotación, altas y bajas mensuales</h2>
+    <canvas id="chartMovimientos"></canvas>
+  </div>
+  <div class="card">
+    <h2>% Bajas / dotación</h2>
+    <canvas id="chartPct"></canvas>
+  </div>
+  <div class="card">
+    <h2>Saldo neto mensual</h2>
+    <canvas id="chartSaldo"></canvas>
+  </div>
+  <div class="card">
+    <h2>Bajas por motivo</h2>
+    <canvas id="chartMotivos"></canvas>
+  </div>
+  <div class="card">
+    <h2>Rotación por empresa</h2>
+    <canvas id="chartEmpresas"></canvas>
+  </div>
+  <div class="card card-wide">
+    <h2>Detalle por empresa</h2>
+    <table id="tablaEmpresas">
+      <thead><tr><th>Empresa</th><th class="num">Dot. promedio</th><th class="num">Altas</th><th class="num">Bajas</th><th class="num">Saldo neto</th><th class="num">% Rotación</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const consol = [{"mes":"Ene 2026","dotacion":518,"altas":13,"reingresos":0,"bajas":5,"saldo":8,"pctBajas":0.97},{"mes":"Feb 2026","dotacion":515,"altas":18,"reingresos":2,"bajas":27,"saldo":-7,"pctBajas":5.24},{"mes":"Mar 2026","dotacion":497,"altas":14,"reingresos":2,"bajas":8,"saldo":8,"pctBajas":1.61},{"mes":"Abr 2026","dotacion":500,"altas":25,"reingresos":4,"bajas":31,"saldo":-2,"pctBajas":6.20},{"mes":"May 2026","dotacion":477,"altas":18,"reingresos":2,"bajas":7,"saldo":13,"pctBajas":1.47}];
+const empresas = [{"empresa":"EMPR0001","dotPromedio":216.6,"altas":22,"bajas":28,"pctRotacion":2.58},{"empresa":"Empr0002","dotPromedio":75.0,"altas":22,"bajas":7,"pctRotacion":1.87},{"empresa":"EMPR0003","dotPromedio":15.0,"altas":0,"bajas":0,"pctRotacion":0.00},{"empresa":"EMPR0005","dotPromedio":85.6,"altas":25,"bajas":18,"pctRotacion":4.21},{"empresa":"EMPR0006","dotPromedio":64.8,"altas":22,"bajas":19,"pctRotacion":5.86},{"empresa":"EMPR0007","dotPromedio":4.0,"altas":0,"bajas":0,"pctRotacion":0.00},{"empresa":"EMPR0009","dotPromedio":6.2,"altas":1,"bajas":0,"pctRotacion":0.00},{"empresa":"EMPR0010","dotPromedio":8.8,"altas":5,"bajas":2,"pctRotacion":4.55},{"empresa":"EMPR0011","dotPromedio":0.8,"altas":0,"bajas":0,"pctRotacion":0.00},{"empresa":"EMPR0012","dotPromedio":0.8,"altas":0,"bajas":0,"pctRotacion":0.00},{"empresa":"EMPR0013","dotPromedio":22.2,"altas":1,"bajas":2,"pctRotacion":1.80},{"empresa":"EMPR0014","dotPromedio":1.6,"altas":0,"bajas":2,"pctRotacion":25.00}];
+const motivos = [{"mes":"Ene","motivo":"RENUNCIA_O_MUTUO","cantidad":5},{"mes":"Feb","motivo":"DESPIDO_SIN_CAUSA","cantidad":3},{"mes":"Feb","motivo":"RENUNCIA_O_MUTUO","cantidad":24},{"mes":"Mar","motivo":"RENUNCIA_O_MUTUO","cantidad":8},{"mes":"Abr","motivo":"DESPIDO_SIN_CAUSA","cantidad":1},{"mes":"Abr","motivo":"RENUNCIA_O_MUTUO","cantidad":30},{"mes":"May","motivo":"RENUNCIA_O_MUTUO","cantidad":7}];
+
+// === KPIs ===
+const totalAltas = consol.reduce((s,r) => s + r.altas + r.reingresos, 0);
+const totalBajas = consol.reduce((s,r) => s + r.bajas, 0);
+const saldoTotal = totalAltas - totalBajas;
+const dotPromedio = Math.round(consol.reduce((s,r) => s + r.dotacion, 0) / consol.length);
+const pctRotacionTotal = ((totalBajas / dotPromedio) * 100).toFixed(2);
+
+const kpis = [
+  {label: "Dotación promedio", value: dotPromedio.toLocaleString('es-AR'), sub: "ene-may 2026"},
+  {label: "Total altas (+ reingresos)", value: totalAltas, sub: "5 meses", cls: "pos"},
+  {label: "Total bajas", value: totalBajas, sub: "5 meses", cls: "neg"},
+  {label: "Saldo neto", value: (saldoTotal>=0?"+":"") + saldoTotal, sub: "altas − bajas", cls: saldoTotal>=0?"pos":"neg"},
+  {label: "% Rotación período", value: pctRotacionTotal + "%", sub: "bajas / dot. promedio", cls: "pct-high"},
+];
+document.getElementById('kpis').innerHTML = kpis.map(k =>
+  `<div class="kpi"><div class="label">${k.label}</div><div class="value ${k.cls||''}">${k.value}</div><div class="sub">${k.sub}</div></div>`
+).join('');
+
+// === Chart 1: Dotación + altas + bajas ===
+new Chart(document.getElementById('chartMovimientos'), {
+  data: {
+    labels: consol.map(r => r.mes),
+    datasets: [
+      {type:'line', label:'Dotación', data: consol.map(r=>r.dotacion), borderColor:'#2c3e50', backgroundColor:'transparent', yAxisID:'y1', tension:0.3, pointRadius:4, order:0},
+      {type:'bar', label:'Altas', data: consol.map(r=>r.altas), backgroundColor:'#27ae60', yAxisID:'y'},
+      {type:'bar', label:'Reingresos', data: consol.map(r=>r.reingresos), backgroundColor:'#16a085', yAxisID:'y'},
+      {type:'bar', label:'Bajas', data: consol.map(r=>-r.bajas), backgroundColor:'#c0392b', yAxisID:'y'},
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    scales: {
+      y: {stacked: true, position: 'left', title: {display:true, text:'Movimientos'}, grid:{color:'#eee'}},
+      y1: {position:'right', title:{display:true, text:'Dotación'}, grid:{drawOnChartArea:false}, beginAtZero:false}
+    },
+    plugins: {legend: {position:'bottom'}}
+  }
+});
+
+// === Chart 2: % Rotación ===
+new Chart(document.getElementById('chartPct'), {
+  type: 'line',
+  data: {
+    labels: consol.map(r=>r.mes),
+    datasets: [{label:'% Bajas / dotación', data: consol.map(r=>r.pctBajas), borderColor:'#e67e22', backgroundColor:'rgba(230,126,34,0.15)', fill:true, tension:0.3, pointRadius:4}]
+  },
+  options: {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{title:{display:true,text:'%'}, beginAtZero:true}}}
+});
+
+// === Chart 3: Saldo neto ===
+new Chart(document.getElementById('chartSaldo'), {
+  type: 'bar',
+  data: {
+    labels: consol.map(r=>r.mes),
+    datasets: [{label:'Saldo neto', data: consol.map(r=>r.saldo), backgroundColor: consol.map(r=>r.saldo>=0?'#27ae60':'#c0392b')}]
+  },
+  options: {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{title:{display:true,text:'Empleados'}}}}
+});
+
+// === Chart 4: Bajas por motivo (stacked) ===
+const meses = [...new Set(motivos.map(r=>r.mes))];
+const tiposMotivo = [...new Set(motivos.map(r=>r.motivo))];
+const colores = {DESPIDO_SIN_CAUSA:'#c0392b', FUERZA_MAYOR:'#e67e22', FALLECIMIENTO:'#7f8c8d', RENUNCIA_O_MUTUO:'#3498db', OTRO:'#95a5a6'};
+new Chart(document.getElementById('chartMotivos'), {
+  type: 'bar',
+  data: {
+    labels: meses,
+    datasets: tiposMotivo.map(m => ({
+      label: m,
+      data: meses.map(mes => motivos.find(r=>r.mes===mes && r.motivo===m)?.cantidad || 0),
+      backgroundColor: colores[m] || '#888'
+    }))
+  },
+  options: {
+    responsive:true, maintainAspectRatio:false,
+    scales: {x:{stacked:true}, y:{stacked:true, title:{display:true,text:'Bajas'}}},
+    plugins:{legend:{position:'bottom', labels:{font:{size:10}}}}
+  }
+});
+
+// === Chart 5: % Rotación por empresa ===
+new Chart(document.getElementById('chartEmpresas'), {
+  type: 'bar',
+  data: {
+    labels: empresas.map(e=>e.empresa),
+    datasets: [{label:'% Rotación', data: empresas.map(e=>e.pctRotacion), backgroundColor:'#9b59b6'}]
+  },
+  options: {indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{title:{display:true,text:'%'}}}}
+});
+
+// === Tabla empresas ===
+const tbody = document.querySelector('#tablaEmpresas tbody');
+tbody.innerHTML = empresas.map(e => {
+  const saldo = e.altas - e.bajas;
+  const cls = saldo >= 0 ? 'pos' : 'neg';
+  return `<tr>
+    <td>${e.empresa}</td>
+    <td class="num">${Math.round(e.dotPromedio)}</td>
+    <td class="num">${e.altas}</td>
+    <td class="num">${e.bajas}</td>
+    <td class="num ${cls}">${saldo>=0?'+':''}${saldo}</td>
+    <td class="num pct-high">${(e.pctRotacion||0).toFixed(2)}%</td>
+  </tr>`;
+}).join('');
+</script>
+
+</body>
+</html>

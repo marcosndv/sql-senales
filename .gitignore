@@ -1,0 +1,23 @@
+# Credenciales y configuracion local del helper SQL
+.sql-helper/
+
+# Configuracion local de Claude (no compartida)
+.claude/settings.local.json
+
+# Datos crudos del ERP origen (DBFs + exports manuales)
+Señales/
+
+# Archivos temporales / scripts de exploracion ad-hoc
+sql/_tmp_*.sql
+sql/_apply_*.sql
+
+# Sistemas operativos
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*~
