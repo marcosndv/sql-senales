@@ -6,9 +6,13 @@
 --
 -- Criterio de inclusion:
 --   1) El empleado tiene al menos una liquidacion MENSUAL (CLASE=3) en el periodo.
---   2) NO es alta/baja a prueba de menos de 5 dias en el periodo: se excluye si
+--   2) NO es baja a prueba de menos de 5 dias en el periodo: se excluye si
 --      existe baja inferida en el mismo PeriodoBaja Y la diferencia entre la
 --      FechaIngreso oficial del empleado y la FechaCierre de la baja es < 5 dias.
+--   3) NO es alta tardia con menos de 5 dias en el mes: se excluye si existe
+--      alta inferida con el mismo PeriodoAlta Y la diferencia entre la
+--      FechaIngreso oficial y el ultimo dia del mes es < 5 dias. La persona
+--      empieza a contar a partir del mes siguiente.
 --
 -- Para agregados:
 --   - Consolidado: COUNT(*) GROUP BY Periodo.
@@ -51,6 +55,21 @@ prueba_corta AS (
       ON n.Empresa = b.Empresa AND n.IdEmpleado = b.IdEmpleado AND n.rn = 1
     WHERE n.FechaIngreso IS NOT NULL
       AND DATEDIFF(DAY, n.FechaIngreso, b.FechaCierre) < 5
+),
+alta_tardia AS (
+    -- altas donde el empleado ingreso a menos de 5 dias del fin del mes
+    SELECT
+        a.Empresa,
+        a.IdEmpleado,
+        a.PeriodoAlta
+    FROM dbo.Sueldos_Altas a
+    JOIN n_dedup n
+      ON n.Empresa = a.Empresa AND n.IdEmpleado = a.IdEmpleado AND n.rn = 1
+    WHERE n.FechaIngreso IS NOT NULL
+      AND DATEDIFF(DAY, n.FechaIngreso, EOMONTH(DATEFROMPARTS(
+            CAST(LEFT(a.PeriodoAlta, 4) AS INT),
+            CAST(RIGHT(a.PeriodoAlta, 2) AS INT),
+            1))) < 5
 )
 SELECT
     lm.Empresa,
@@ -78,4 +97,11 @@ WHERE NOT EXISTS (
     WHERE pc.Empresa = lm.Empresa
       AND pc.IdEmpleado = lm.IdEmpleado
       AND pc.PeriodoBaja = lm.Periodo
+)
+AND NOT EXISTS (
+    SELECT 1
+    FROM alta_tardia at
+    WHERE at.Empresa = lm.Empresa
+      AND at.IdEmpleado = lm.IdEmpleado
+      AND at.PeriodoAlta = lm.Periodo
 );

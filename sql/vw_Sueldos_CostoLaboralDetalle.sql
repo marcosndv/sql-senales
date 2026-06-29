@@ -188,6 +188,38 @@ ContribSindicalPorEmpleado AS (
 EmpleadosXLiq AS (
     SELECT DISTINCT Empresa, LIQUIDAC, EMPLEADO
     FROM dbo.vw_Sueldos_LiqDetalladas
+),
+
+-- ------------------------------------------------------------------
+-- 9. Bajas inferidas por (Empresa, CUIL, PeriodoBaja).
+--    Match por CUIL (no por IdEmpleado) y por PeriodoBaja = PERIODO de la
+--    liquidacion. Marca tanto la mensual como la liq final del mes de baja.
+-- ------------------------------------------------------------------
+BajasIndex AS (
+    SELECT
+        Empresa,
+        CUIL,
+        PeriodoBaja,
+        MotivoBaja,
+        FechaCierre              AS FechaBaja,
+        TotalLiquidacionFinal
+    FROM dbo.Sueldos_Bajas
+),
+
+-- ------------------------------------------------------------------
+-- 10. Altas inferidas por (Empresa, CUIL, PeriodoAlta).
+--     Mismo patron que bajas: TipoAlta = ALTA_NUEVA / REINGRESO,
+--     GapMeses = meses sin liquidacion previa (0 = sin gap).
+-- ------------------------------------------------------------------
+AltasIndex AS (
+    SELECT
+        Empresa,
+        CUIL,
+        PeriodoAlta,
+        TipoAlta,
+        GapMeses,
+        PeriodoPrevio
+    FROM dbo.Sueldos_Altas
 )
 
 -- ------------------------------------------------------------------
@@ -292,6 +324,18 @@ SELECT
         + ISNULL(csind.ContribSindicalPorCabeza, 0), 2
     )                                                   AS TotalCostoLaboral,
 
+    -- === BAJA DEL PERIODO ===
+    CAST(CASE WHEN bx.CUIL IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS EsBaja,
+    bx.MotivoBaja                                       AS MotivoBaja,
+    bx.FechaBaja                                        AS FechaBaja,
+    bx.TotalLiquidacionFinal                            AS TotalLiquidacionFinal,
+
+    -- === ALTA DEL PERIODO ===
+    CAST(CASE WHEN ax.CUIL IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS EsAlta,
+    ax.TipoAlta                                         AS TipoAlta,
+    ax.GapMeses                                         AS GapMeses,
+    ax.PeriodoPrevio                                    AS PeriodoPrevio,
+
     -- === IDs ===
     emp.CODIGO                                          AS IdEmpleado
 
@@ -355,4 +399,16 @@ LEFT JOIN dbo.Config_Sindicatos sind
 
 -- Razon social
 LEFT JOIN dbo.Config_Empresas_Sueldos ce
-    ON  ce.Empresa = emp.Empresa;
+    ON  ce.Empresa = emp.Empresa
+
+-- Baja del periodo (match por Empresa + CUIL + PeriodoBaja = PERIODO)
+LEFT JOIN BajasIndex bx
+    ON  bx.Empresa     = emp.Empresa
+    AND bx.CUIL        = emp.CUIL
+    AND bx.PeriodoBaja = liq.PERIODO
+
+-- Alta del periodo (match por Empresa + CUIL + PeriodoAlta = PERIODO)
+LEFT JOIN AltasIndex ax
+    ON  ax.Empresa     = emp.Empresa
+    AND ax.CUIL        = emp.CUIL
+    AND ax.PeriodoAlta = liq.PERIODO;

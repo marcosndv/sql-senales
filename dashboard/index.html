@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Dashboard Sueldos · Señales</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<style>
+  :root {
+    --bg:       #fafbfc;
+    --panel:    #ffffff;
+    --panel2:   #f7f9fc;
+    --soft:     #f1f5f9;
+    --border:   #eef0f3;
+    --divider:  #f1f5f9;
+    --text:     #1f2937;
+    --muted:    #6b7280;
+    --accent:   #4f46e5;
+    --accent2:  #7c3aed;
+    --ok:       #10b981;
+    --warn:     #f59e0b;
+    --danger:   #ef4444;
+    --cocina:   #ea580c;
+    --servicio: #4f46e5;
+    --otros:    #6b7280;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.04), 0 0 0 1px rgba(15,23,42,0.03);
+    --shadow-md: 0 4px 12px rgba(15,23,42,0.05), 0 0 0 1px rgba(15,23,42,0.03);
+    --radius:    12px;
+    --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    padding: 28px 32px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--divider);
+  }
+  h1 {
+    margin: 0 0 4px;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    margin: 0 0 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.005em;
+  }
+  .updated {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .updated span { color: var(--text); font-weight: 600; }
+
+  /* Filtros */
+  .filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    background: var(--panel);
+    padding: 18px 20px;
+    border-radius: var(--radius);
+    margin-bottom: 22px;
+    box-shadow: var(--shadow-sm);
+  }
+  .filters label {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+  .filters select, .filters input {
+    width: 100%;
+    background: var(--soft);
+    border: 1px solid transparent;
+    color: var(--text);
+    padding: 9px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 500;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    outline: none;
+  }
+  .filters select:hover, .filters input:hover { background: #eef0f3; }
+  .filters select:focus, .filters input:focus {
+    background: var(--panel);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(79,70,229,0.12);
+  }
+
+  /* KPIs */
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px;
+    margin-bottom: 22px;
+  }
+  .kpi {
+    background: var(--panel);
+    padding: 20px 22px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s, transform 0.2s;
+  }
+  .kpi:hover { box-shadow: var(--shadow-md); }
+  .kpi .label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 10px;
+    font-weight: 500;
+  }
+  .kpi .value {
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi .delta {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 6px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .delta.up   { color: var(--ok); }
+  .delta.down { color: var(--danger); }
+
+  /* Grids y cards */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+    gap: 18px;
+  }
+  .grid.wide { grid-template-columns: 1fr; }
+  .card {
+    background: var(--panel);
+    padding: 22px 24px;
+    border-radius: var(--radius);
+    min-height: 320px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s;
+  }
+  .card:hover { box-shadow: var(--shadow-md); }
+  .card.tall { min-height: 380px; }
+  .card .chart-wrap { position: relative; height: 280px; }
+  .card.tall .chart-wrap { height: 320px; }
+
+  /* Scroll containers */
+  .chart-scroll, .scroll {
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .chart-scroll { height: 280px; }
+  .scroll { max-height: 360px; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* Search bar */
+  .search-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .search-bar input {
+    flex: 1;
+    background: var(--soft);
+    border: 1px solid transparent;
+    color: var(--text);
+    padding: 9px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    outline: none;
+  }
+  .search-bar input:focus {
+    background: var(--panel);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(79,70,229,0.12);
+  }
+  .search-bar input::placeholder { color: var(--muted); }
+
+  /* Tablas */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    z-index: 1;
+  }
+  th, td {
+    padding: 11px 14px;
+    text-align: right;
+    border-bottom: 1px solid var(--divider);
+  }
+  th:first-child, td:first-child { text-align: left; }
+  th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  td { font-variant-numeric: tabular-nums; }
+  td:first-child { font-weight: 500; color: var(--text); }
+  tr { transition: background 0.12s; }
+  tbody tr:hover td { background: var(--panel2); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* Pills */
+  .pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .pill.cocina   { background: rgba(234,88,12,0.10);  color: var(--cocina); }
+  .pill.servicio { background: rgba(79,70,229,0.10);  color: var(--servicio); }
+  .pill.otros    { background: rgba(100,116,139,0.10); color: var(--otros); }
+
+  .err { color: var(--danger); padding: 40px; text-align: center; font-weight: 500; }
+
+  @media (max-width: 768px) {
+    body { padding: 16px; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Dashboard Sueldos · Señales</h1>
+    <div class="updated" id="lastUpdated">Cargando...</div>
+  </div>
+  <div class="updated">
+    Período activo: <span id="periodoActivo">-</span>
+    · Total activos: <span id="totalActivos">-</span>
+  </div>
+</header>
+
+<div class="filters">
+  <div>
+    <label>Período desde</label>
+    <select id="filterFrom"></select>
+  </div>
+  <div>
+    <label>Período hasta</label>
+    <select id="filterTo"></select>
+  </div>
+  <div>
+    <label>Centro de Costo</label>
+    <select id="filterCC"><option value="">Todos</option></select>
+  </div>
+  <div>
+    <label>Empresa</label>
+    <select id="filterEmpresa"><option value="">Todas</option></select>
+  </div>
+  <div>
+    <label>Tipo de Trabajo</label>
+    <select id="filterTipo">
+      <option value="">Todos</option>
+      <option value="COCINA">Cocina</option>
+      <option value="SERVICIO">Servicio</option>
+      <option value="OTROS">Otros</option>
+    </select>
+  </div>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="grid">
+  <div class="card tall">
+    <h2>Evolución de Nómina</h2>
+    <div class="chart-wrap"><canvas id="chartNomina"></canvas></div>
+  </div>
+  <div class="card tall">
+    <h2>Evolución del Costo Empresa</h2>
+    <div class="chart-wrap"><canvas id="chartCosto"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Costo por Categoría</h2>
+    <div class="chart-wrap"><canvas id="chartCostoCat"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Altas vs Bajas por Período</h2>
+    <div class="chart-wrap"><canvas id="chartAltasBajas"></canvas></div>
+  </div>
+  <div class="card" id="cardActivaCC">
+    <h2>Nómina activa por Centro de Costo</h2>
+    <div class="chart-scroll">
+      <div class="chart-wrap" id="wrapActivaCC"><canvas id="chartActivaCC"></canvas></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Nómina activa por Tipo de Trabajo</h2>
+    <div class="chart-wrap"><canvas id="chartActivaTipo"></canvas></div>
+  </div>
+</div>
+
+<div class="grid wide" style="margin-top: 16px;">
+  <div class="card">
+    <h2>Matriz nómina activa: CC × Cocina / Servicio / Otros</h2>
+    <div class="scroll">
+      <table id="tablaMatriz">
+        <thead><tr><th>Centro de Costo</th><th>Cocina</th><th>Servicio</th><th>Otros</th><th>Total</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Nómina activa por Puesto de Trabajo</h2>
+    <div class="scroll">
+      <table id="tablaPuestos">
+        <thead><tr><th>Puesto</th><th>Cocina</th><th>Servicio</th><th>Otros</th><th>Total</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Detalle de empleados activos (<span id="empCount">-</span>)</h2>
+    <div class="search-bar">
+      <input type="text" id="empSearch" placeholder="Buscar empleado por nombre o CUIL...">
+    </div>
+    <div class="scroll">
+      <table id="tablaEmpleados">
+        <thead><tr>
+          <th>Empleado</th><th>CUIL</th><th>Empresa</th>
+          <th>Centro de Costo</th><th>Puesto</th><th>Tipo</th>
+          <th style="text-align:right">Costo último mes</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// Registrar datalabels globalmente (cada chart puede sobre-escribir options.plugins.datalabels)
+Chart.register(ChartDataLabels);
+Chart.defaults.plugins.datalabels = { display: false }; // off por default, opt-in por chart
+Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+Chart.defaults.font.size = 12;
+Chart.defaults.color = '#1f2937';
+Chart.defaults.elements.bar.borderRadius = 6;
+Chart.defaults.elements.bar.borderSkipped = false;
+Chart.defaults.elements.line.tension = 0.35;
+Chart.defaults.elements.line.borderWidth = 2.5;
+Chart.defaults.elements.point.radius = 3;
+Chart.defaults.elements.point.hoverRadius = 5;
+Chart.defaults.elements.point.backgroundColor = '#fff';
+Chart.defaults.elements.point.borderWidth = 2;
+
+const fmtInt = n => (n == null ? '-' : Math.round(n).toLocaleString('es-AR'));
+const fmtMoney = n => (n == null ? '-' : '$ ' + (Math.round(n)).toLocaleString('es-AR'));
+const fmtMoneyShort = n => {
+  if (n == null) return '-';
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return '$ ' + (n/1e9).toFixed(1) + ' MM';
+  if (abs >= 1e6) return '$ ' + (n/1e6).toFixed(1) + ' M';
+  if (abs >= 1e3) return '$ ' + (n/1e3).toFixed(0) + ' K';
+  return '$ ' + n.toFixed(0);
+};
+
+let DATA = null;
+let charts = {};
+
+function fmtPeriodo(p) {
+  if (!p || p.length !== 6) return p;
+  const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  return meses[parseInt(p.slice(4,6))-1] + ' ' + p.slice(0,4);
+}
+
+function periodoInRange(p, from, to) {
+  return (!from || p >= from) && (!to || p <= to);
+}
+
+async function loadData() {
+  try {
+    const res = await fetch('data.json?t=' + Date.now());
+    if (!res.ok) throw new Error('No se pudo leer data.json (status ' + res.status + '). Corré scripts/export_dashboard.ps1');
+    DATA = await res.json();
+    init();
+  } catch (e) {
+    document.body.innerHTML = '<div class="err">' + e.message + '</div>';
+  }
+}
+
+function init() {
+  document.getElementById('lastUpdated').textContent = 'Datos al ' + new Date(DATA.lastUpdated).toLocaleString('es-AR');
+  document.getElementById('periodoActivo').textContent = fmtPeriodo(DATA.periodoEvaluado);
+
+  const periodos = DATA.periodos.map(p => p.Periodo);
+  const selFrom = document.getElementById('filterFrom');
+  const selTo = document.getElementById('filterTo');
+  for (const p of periodos) {
+    selFrom.innerHTML += `<option value="${p}">${fmtPeriodo(p)}</option>`;
+    selTo.innerHTML += `<option value="${p}">${fmtPeriodo(p)}</option>`;
+  }
+  selFrom.value = periodos[0];
+  selTo.value = periodos[periodos.length - 1];
+
+  const selCC = document.getElementById('filterCC');
+  for (const cc of DATA.centrosCosto) {
+    if (!cc.NombreCC) continue;
+    selCC.innerHTML += `<option value="${cc.NombreCC}">${cc.NombreCC}</option>`;
+  }
+
+  const selEmp = document.getElementById('filterEmpresa');
+  for (const e of DATA.empresas) {
+    selEmp.innerHTML += `<option value="${e.Empresa}">${e.RazonSocial}</option>`;
+  }
+
+  for (const id of ['filterFrom','filterTo','filterCC','filterEmpresa','filterTipo']) {
+    document.getElementById(id).addEventListener('change', render);
+  }
+  document.getElementById('empSearch').addEventListener('input', () => {
+    const f = getFilters();
+    const empActivos = DATA.nominaActiva.empleados.filter(r =>
+      (!f.emp  || r.Empresa     === f.emp) &&
+      (!f.cc   || r.NombreCC    === f.cc)  &&
+      (!f.tipo || r.TipoTrabajo === f.tipo)
+    );
+    renderEmpleados(f, empActivos);
+  });
+
+  render();
+}
+
+function getFilters() {
+  return {
+    from: document.getElementById('filterFrom').value,
+    to:   document.getElementById('filterTo').value,
+    cc:   document.getElementById('filterCC').value,
+    emp:  document.getElementById('filterEmpresa').value,
+    tipo: document.getElementById('filterTipo').value,
+  };
+}
+
+function aggregate(rows, keyFn, valueFn) {
+  const map = new Map();
+  for (const r of rows) {
+    const k = keyFn(r);
+    map.set(k, (map.get(k) || 0) + valueFn(r));
+  }
+  return map;
+}
+
+function uniqueAggregate(rows, keyFn, idFn) {
+  const map = new Map();
+  for (const r of rows) {
+    const k = keyFn(r);
+    if (!map.has(k)) map.set(k, new Set());
+    map.get(k).add(idFn(r));
+  }
+  const out = new Map();
+  for (const [k, set] of map.entries()) out.set(k, set.size);
+  return out;
+}
+
+function render() {
+  const f = getFilters();
+
+  // ---- Filtrado uniforme sobre fact tables ----
+  // Todos los filtros (Periodo, Empresa, CC, Tipo) cruzan sobre todos los visuales.
+  const matchFact = r =>
+    periodoInRange(r.Periodo, f.from, f.to) &&
+    (!f.emp  || r.Empresa     === f.emp) &&
+    (!f.cc   || r.NombreCC    === f.cc)  &&
+    (!f.tipo || r.TipoTrabajo === f.tipo);
+
+  const nominaRows = DATA.nominaMensual.fact.filter(matchFact);
+  const costoRows  = DATA.costoMensual.fact.filter(matchFact);
+
+  // Series por periodo
+  const nominaSerie = [...aggregate(nominaRows, r => r.Periodo, r => r.Personas).entries()]
+    .sort().map(([p,v]) => ({Periodo: p, Personas: v}));
+
+  const costoSerie = [...aggregate(costoRows, r => r.Periodo, r => r.CostoTotal).entries()]
+    .sort().map(([p,v]) => ({Periodo: p, CostoTotal: v}));
+
+  // Costo por categoria por periodo (respeta filtros)
+  const catMap = new Map();
+  for (const r of costoRows) {
+    if (!catMap.has(r.Periodo)) {
+      catMap.set(r.Periodo, {Periodo: r.Periodo, BrutoRem: 0, BrutoNoRem: 0, Contribuciones: 0});
+    }
+    const o = catMap.get(r.Periodo);
+    if (r.Categoria === 'BRUTO_REMUNERATIVO')    o.BrutoRem       += r.CostoTotal;
+    if (r.Categoria === 'BRUTO_NO_REMUNERATIVO') o.BrutoNoRem     += r.CostoTotal;
+    if (r.Categoria === 'CONTRIBUCION_PATRONAL') o.Contribuciones += r.CostoTotal;
+  }
+  const costoCatSerie = [...catMap.values()].sort((a,b) => a.Periodo.localeCompare(b.Periodo));
+
+  // ---- KPIs ----
+  const lastN = nominaSerie[nominaSerie.length - 1];
+  const prevN = nominaSerie[nominaSerie.length - 2];
+  const lastC = costoSerie[costoSerie.length - 1];
+  const prevC = costoSerie[costoSerie.length - 2];
+  const detalleAB = DATA.altasBajas.detalle.filter(r =>
+    periodoInRange(r.Periodo, f.from, f.to) &&
+    (!f.cc   || r.NombreCC    === f.cc)  &&
+    (!f.emp  || r.Empresa     === f.emp) &&
+    (!f.tipo || r.TipoTrabajo === f.tipo)
+  );
+  const totalAltas = detalleAB.filter(r => r.Tipo === 'ALTA').length;
+  const totalBajas = detalleAB.filter(r => r.Tipo === 'BAJA').length;
+
+  const dN = lastN && prevN ? lastN.Personas - prevN.Personas : null;
+  const dC = lastC && prevC ? lastC.CostoTotal - prevC.CostoTotal : null;
+
+  const kpis = [
+    {label: 'Personas en nómina · último período', value: fmtInt(lastN?.Personas), delta: dN, fmt: fmtInt},
+    {label: 'Costo empresa · último período', value: fmtMoneyShort(lastC?.CostoTotal), delta: dC, fmt: fmtMoneyShort},
+    {label: 'Altas en rango', value: fmtInt(totalAltas), delta: null},
+    {label: 'Bajas en rango', value: fmtInt(totalBajas), delta: null},
+  ];
+  document.getElementById('kpis').innerHTML = kpis.map(k => {
+    let deltaHtml = '';
+    if (k.delta != null) {
+      const cls = k.delta > 0 ? 'up' : k.delta < 0 ? 'down' : '';
+      const sign = k.delta > 0 ? '+' : '';
+      deltaHtml = `<div class="delta ${cls}">${sign}${k.fmt(k.delta)} vs mes ant.</div>`;
+    }
+    return `<div class="kpi"><div class="label">${k.label}</div><div class="value">${k.value}</div>${deltaHtml}</div>`;
+  }).join('');
+
+  // ---- Gráficos ----
+  destroyCharts();
+
+  charts.nomina = new Chart(document.getElementById('chartNomina'), {
+    type: 'line',
+    data: {
+      labels: nominaSerie.map(r => fmtPeriodo(r.Periodo)),
+      datasets: [{
+        label: 'Personas',
+        data: nominaSerie.map(r => r.Personas),
+        borderColor: '#6366f1',
+        backgroundColor: 'rgba(99,102,241,0.10)',
+        fill: true,
+        tension: 0.3,
+      }]
+    },
+    options: chartLineOpts()
+  });
+
+  charts.costo = new Chart(document.getElementById('chartCosto'), {
+    type: 'line',
+    data: {
+      labels: costoSerie.map(r => fmtPeriodo(r.Periodo)),
+      datasets: [{
+        label: 'Costo Empresa',
+        data: costoSerie.map(r => r.CostoTotal),
+        borderColor: '#8b5cf6',
+        backgroundColor: 'rgba(139,92,246,0.10)',
+        fill: true,
+        tension: 0.3,
+      }]
+    },
+    options: chartLineOpts(true)
+  });
+
+  charts.costoCat = new Chart(document.getElementById('chartCostoCat'), {
+    type: 'bar',
+    data: {
+      labels: costoCatSerie.map(r => fmtPeriodo(r.Periodo)),
+      datasets: [
+        {label: 'Bruto Remun.',     data: costoCatSerie.map(r => r.BrutoRem),       backgroundColor: '#6366f1'},
+        {label: 'Bruto No Remun.',  data: costoCatSerie.map(r => r.BrutoNoRem),     backgroundColor: '#f59e0b'},
+        {label: 'Contrib. Patron.', data: costoCatSerie.map(r => r.Contribuciones), backgroundColor: '#f97316'},
+      ]
+    },
+    options: chartStackedOpts()
+  });
+
+  // Reagrupar detalle filtrado por periodo
+  const abMap = new Map();
+  for (const r of detalleAB) {
+    if (!abMap.has(r.Periodo)) abMap.set(r.Periodo, {Altas: 0, Bajas: 0});
+    abMap.get(r.Periodo)[r.Tipo === 'ALTA' ? 'Altas' : 'Bajas']++;
+  }
+  const ab = [...abMap.entries()].sort().map(([p, v]) => ({Periodo: p, Altas: v.Altas, Bajas: v.Bajas}));
+  charts.ab = new Chart(document.getElementById('chartAltasBajas'), {
+    type: 'bar',
+    data: {
+      labels: ab.map(r => fmtPeriodo(r.Periodo)),
+      datasets: [
+        {label: 'Altas', data: ab.map(r => r.Altas), backgroundColor: '#10b981'},
+        {label: 'Bajas', data: ab.map(r => -r.Bajas), backgroundColor: '#ef4444'},
+      ]
+    },
+    options: chartGroupedOpts()
+  });
+
+  // Nomina activa filtrada (los visuales de "activa" se derivan de empleados,
+  // que tiene Empresa+CC+TipoTrabajo por fila → cualquier filtro cruza).
+  const empActivos = DATA.nominaActiva.empleados.filter(r =>
+    (!f.emp  || r.Empresa     === f.emp) &&
+    (!f.cc   || r.NombreCC    === f.cc)  &&
+    (!f.tipo || r.TipoTrabajo === f.tipo)
+  );
+
+  // Activa por CC
+  const ccMap = new Map();
+  for (const r of empActivos) ccMap.set(r.NombreCC || 'Sin asignar',
+                                       (ccMap.get(r.NombreCC || 'Sin asignar') || 0) + 1);
+  const activaCC = [...ccMap.entries()].map(([k,v]) => ({NombreCC: k, Personas: v}))
+                                        .sort((a,b) => b.Personas - a.Personas);
+  // Altura dinamica: 22px por barra + margen, min 280
+  const ccHeight = Math.max(280, activaCC.length * 22 + 40);
+  document.getElementById('wrapActivaCC').style.height = ccHeight + 'px';
+  charts.activaCC = new Chart(document.getElementById('chartActivaCC'), {
+    type: 'bar',
+    data: {
+      labels: activaCC.map(r => r.NombreCC),
+      datasets: [{label: 'Personas', data: activaCC.map(r => r.Personas), backgroundColor: '#6366f1'}]
+    },
+    options: chartHorizOpts(true)
+  });
+
+  // Activa por Tipo
+  const tipoMap = new Map();
+  for (const r of empActivos) tipoMap.set(r.TipoTrabajo || 'OTROS',
+                                          (tipoMap.get(r.TipoTrabajo || 'OTROS') || 0) + 1);
+  const activaTipo = [...tipoMap.entries()].map(([k,v]) => ({TipoTrabajo: k, Personas: v}));
+  charts.activaTipo = new Chart(document.getElementById('chartActivaTipo'), {
+    type: 'doughnut',
+    data: {
+      labels: activaTipo.map(r => r.TipoTrabajo),
+      datasets: [{
+        data: activaTipo.map(r => r.Personas),
+        backgroundColor: activaTipo.map(r =>
+          r.TipoTrabajo === 'COCINA' ? '#f97316' :
+          r.TipoTrabajo === 'SERVICIO' ? '#6366f1' : '#94a3b8'),
+        borderColor: '#fff',
+        borderWidth: 3,
+        spacing: 2,
+      }]
+    },
+    options: chartDoughnutOpts()
+  });
+
+  // Tablas (todas derivadas de empActivos = mismo set filtrado)
+  renderMatriz(empActivos);
+  renderPuestos(empActivos);
+  renderEmpleados(f, empActivos);
+
+  // Total activos del header (reactivo al filtro)
+  document.getElementById('totalActivos').textContent = fmtInt(empActivos.length);
+}
+
+function pivotPorClave(empActivos, claveFn) {
+  const pivot = new Map();
+  for (const r of empActivos) {
+    const k = claveFn(r) || 'Sin asignar';
+    if (!pivot.has(k)) pivot.set(k, {COCINA:0, SERVICIO:0, OTROS:0});
+    pivot.get(k)[r.TipoTrabajo || 'OTROS']++;
+  }
+  return [...pivot.entries()].map(([nombre, vals]) => ({
+    nombre, ...vals, total: vals.COCINA + vals.SERVICIO + vals.OTROS
+  })).sort((a,b) => b.total - a.total);
+}
+
+function renderMatriz(empActivos) {
+  const rows = pivotPorClave(empActivos, r => r.NombreCC);
+  document.querySelector('#tablaMatriz tbody').innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.nombre}</td>
+      <td>${r.COCINA   ? `<span class="pill cocina">${fmtInt(r.COCINA)}</span>`     : '-'}</td>
+      <td>${r.SERVICIO ? `<span class="pill servicio">${fmtInt(r.SERVICIO)}</span>` : '-'}</td>
+      <td>${r.OTROS    ? `<span class="pill otros">${fmtInt(r.OTROS)}</span>`       : '-'}</td>
+      <td><strong>${fmtInt(r.total)}</strong></td>
+    </tr>
+  `).join('');
+}
+
+function renderPuestos(empActivos) {
+  const rows = pivotPorClave(empActivos, r => r.Puesto);
+  document.querySelector('#tablaPuestos tbody').innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.nombre}</td>
+      <td>${r.COCINA   ? `<span class="pill cocina">${fmtInt(r.COCINA)}</span>`     : '-'}</td>
+      <td>${r.SERVICIO ? `<span class="pill servicio">${fmtInt(r.SERVICIO)}</span>` : '-'}</td>
+      <td>${r.OTROS    ? `<span class="pill otros">${fmtInt(r.OTROS)}</span>`       : '-'}</td>
+      <td><strong>${fmtInt(r.total)}</strong></td>
+    </tr>
+  `).join('');
+}
+
+function renderEmpleados(f, empActivos) {
+  const q = (document.getElementById('empSearch')?.value || '').trim().toLowerCase();
+  let emp = empActivos.filter(r =>
+    !q || (r.NombreEmpleado || '').toLowerCase().includes(q)
+       || (r.CUIL || '').toLowerCase().includes(q)
+  );
+  emp.sort((a,b) => (a.NombreEmpleado || '').localeCompare(b.NombreEmpleado || ''));
+  document.getElementById('empCount').textContent = fmtInt(emp.length);
+  document.querySelector('#tablaEmpleados tbody').innerHTML = emp.map(r => {
+    const tipoCls = (r.TipoTrabajo || 'OTROS').toLowerCase();
+    return `
+    <tr>
+      <td>${r.NombreEmpleado || '-'}</td>
+      <td>${r.CUIL || '-'}</td>
+      <td>${r.RazonSocial || r.Empresa || '-'}</td>
+      <td>${r.NombreCC || 'Sin asignar'}</td>
+      <td>${r.Puesto || '-'}</td>
+      <td>${r.TipoTrabajo ? `<span class="pill ${tipoCls}">${r.TipoTrabajo}</span>` : '-'}</td>
+      <td style="text-align:right">${r.Costo ? fmtMoney(r.Costo) : '-'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function destroyCharts() {
+  for (const k in charts) { if (charts[k]) charts[k].destroy(); }
+  charts = {};
+}
+
+function chartLineOpts(money=false) {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#1f2937' } },
+      datalabels: {
+        display: true, color: '#1f2937', align: 'top', anchor: 'end',
+        font: { size: 10, weight: 'bold' },
+        formatter: v => money ? fmtMoneyShort(v) : fmtInt(v)
+      }
+    },
+    scales: {
+      x: { ticks: { color: '#6b7280' }, grid: { color: '#f1f5f9' } },
+      y: { ticks: { color: '#6b7280', callback: v => money ? fmtMoneyShort(v) : fmtInt(v) }, grid: { color: '#f1f5f9' } }
+    }
+  };
+}
+function chartStackedOpts() {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#1f2937' } },
+      datalabels: {
+        display: ctx => ctx.dataset.data[ctx.dataIndex] > 0
+                    && ctx.dataset.data[ctx.dataIndex] / (ctx.chart.scales.y.max || 1) > 0.04,
+        color: '#fff', font: { size: 9, weight: 'bold' },
+        formatter: v => fmtMoneyShort(v)
+      }
+    },
+    scales: {
+      x: { stacked: true, ticks: { color: '#6b7280' }, grid: { color: '#f1f5f9' } },
+      y: { stacked: true, ticks: { color: '#6b7280', callback: v => fmtMoneyShort(v) }, grid: { color: '#f1f5f9' } }
+    }
+  };
+}
+function chartGroupedOpts() {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#1f2937' } },
+      datalabels: {
+        display: ctx => ctx.dataset.data[ctx.dataIndex] !== 0,
+        color: '#1f2937', font: { size: 10, weight: 'bold' },
+        align: ctx => ctx.dataset.data[ctx.dataIndex] >= 0 ? 'end' : 'start',
+        anchor: ctx => ctx.dataset.data[ctx.dataIndex] >= 0 ? 'end' : 'start',
+        formatter: v => fmtInt(Math.abs(v))
+      }
+    },
+    scales: {
+      x: { ticks: { color: '#6b7280' }, grid: { color: '#f1f5f9' } },
+      y: { ticks: { color: '#6b7280', callback: v => fmtInt(Math.abs(v)) }, grid: { color: '#f1f5f9' } }
+    }
+  };
+}
+function chartHorizOpts(showLabels=false) {
+  return {
+    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      datalabels: showLabels ? {
+        display: true, color: '#1f2937', anchor: 'end', align: 'end', offset: 4,
+        font: { size: 10, weight: 'bold' },
+        formatter: v => fmtInt(v)
+      } : { display: false }
+    },
+    scales: {
+      x: { ticks: { color: '#6b7280' }, grid: { color: '#f1f5f9' } },
+      y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#f1f5f9' } }
+    }
+  };
+}
+function chartDoughnutOpts() {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'right', labels: { color: '#1f2937' } },
+      datalabels: {
+        display: true, color: '#fff', font: { size: 12, weight: 'bold' },
+        formatter: (v, ctx) => {
+          const total = ctx.dataset.data.reduce((s,x) => s + x, 0);
+          const pct = total ? (v / total * 100).toFixed(0) : 0;
+          return fmtInt(v) + '\n(' + pct + '%)';
+        },
+        textAlign: 'center'
+      }
+    }
+  };
+}
+
+loadData();
+</script>
+</body>
+</html>

@@ -12,6 +12,8 @@
 --                            desde dbo.vw_Sueldos_ContribucionesXEmpleado.
 --                            NOTA: solo disponible desde 202603 en adelante en
 --                            la base actual. Los meses anteriores quedan subestimados.
+--                            Para el dashboard se usa Sueldos_CostoLaboralBI que
+--                            tiene cobertura completa via SICOSS prorrateado.
 --
 -- NO suman al costo empresa (deliberadamente excluidos):
 --   APORTE         -- descuento al empleado (jub 11%, OS, sindical) -- no es costo extra
@@ -70,9 +72,6 @@ contrib AS (
         c.IdEmpleado,
         CAST(NULL AS NVARCHAR(100))      AS NombreEmpleado,
         CAST(NULL AS NVARCHAR(11))       AS CUIL,
-        -- las contribuciones no tienen CC propio -- se asume el CC del recibo
-        -- correspondiente (toma el primer CC observado para ese empleado en el
-        -- periodo). Si la persona tiene 1 solo CC, exacto.
         (SELECT TOP 1 r2.CodigosCentroCosto
          FROM dbo.vw_Sueldos_ReciboDetalle_Normalizado r2
          WHERE r2.Empresa=c.Empresa AND r2.IdEmpleado=c.IdEmpleado
@@ -89,7 +88,7 @@ contrib AS (
     FROM dbo.vw_Sueldos_ContribucionesXEmpleado c
     LEFT JOIN dbo.vw_Sueldos_Liquidaciones_MesEconomico me
            ON me.Empresa = c.Empresa AND me.IdLiquidacion = c.IdLiquidacion
-    WHERE COALESCE(me.CLASE, 3) <> 5     -- excluye contribs de liqs finales
+    WHERE COALESCE(me.CLASE, 3) <> 5
 ),
 todo AS (
     SELECT * FROM recibo
