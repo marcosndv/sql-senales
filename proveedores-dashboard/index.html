@@ -173,12 +173,12 @@
     <select id="filtMoneda"><option value="">Todas</option></select>
   </div>
   <div>
-    <label>Estado de vencimiento</label>
-    <select id="filtEstado">
-      <option value="">Todos</option>
-      <option value="vencida">Vencidas</option>
-      <option value="reciente">Vencidas ≤ 30d</option>
-    </select>
+    <label>Vencimiento desde (año)</label>
+    <select id="filtAnioDesde"></select>
+  </div>
+  <div>
+    <label>Vencimiento hasta (año)</label>
+    <select id="filtAnioHasta"></select>
   </div>
   <div>
     <label>Buscar proveedor</label>
@@ -308,7 +308,20 @@ function init() {
     selMon.innerHTML += `<option value="${m}">${m}</option>`;
   }
 
-  for (const id of ['filtEmpresa','filtTipo','filtMoneda','filtEstado','filtProveedor']) {
+  // Poblar filtros de año
+  const anios = [...new Set(DATA.facturas.map(f => f.FechaVencimiento?.slice(0,4)).filter(Boolean))].sort();
+  const selDesde = document.getElementById('filtAnioDesde');
+  const selHasta = document.getElementById('filtAnioHasta');
+  for (const a of anios) {
+    selDesde.innerHTML += `<option value="${a}">${a}</option>`;
+    selHasta.innerHTML += `<option value="${a}">${a}</option>`;
+  }
+  // Defecto: últimos 2 años
+  const anioActual = new Date().getFullYear();
+  selDesde.value = String(anioActual - 1);
+  selHasta.value = String(anioActual);
+
+  for (const id of ['filtEmpresa','filtTipo','filtMoneda','filtAnioDesde','filtAnioHasta','filtProveedor']) {
     document.getElementById(id).addEventListener('input', render);
   }
   document.getElementById('tablaSearch').addEventListener('input', renderTabla);
@@ -318,21 +331,23 @@ function init() {
 
 function getFilters() {
   return {
-    empresa  : document.getElementById('filtEmpresa').value,
-    tipo     : document.getElementById('filtTipo').value,
-    moneda   : document.getElementById('filtMoneda').value,
-    estado   : document.getElementById('filtEstado').value,
-    proveedor: document.getElementById('filtProveedor').value.trim().toLowerCase(),
+    empresa   : document.getElementById('filtEmpresa').value,
+    tipo      : document.getElementById('filtTipo').value,
+    moneda    : document.getElementById('filtMoneda').value,
+    anioDesde : document.getElementById('filtAnioDesde').value,
+    anioHasta : document.getElementById('filtAnioHasta').value,
+    proveedor : document.getElementById('filtProveedor').value.trim().toLowerCase(),
   };
 }
 
 function applyFilters(rows, f) {
   return rows.filter(r => {
-    if (f.empresa   && r.EmpresaId       !== f.empresa) return false;
-    if (f.tipo      && r.TipoComprobante !== f.tipo)    return false;
-    if (f.moneda    && r.Moneda          !== f.moneda)  return false;
-    if (f.estado === 'vencida'  && r.DiasAtraso <= 0)  return false;
-    if (f.estado === 'reciente' && (r.DiasAtraso <= 0 || r.DiasAtraso > 30)) return false;
+    if (f.empresa  && r.EmpresaId       !== f.empresa) return false;
+    if (f.tipo     && r.TipoComprobante !== f.tipo)    return false;
+    if (f.moneda   && r.Moneda          !== f.moneda)  return false;
+    const anioVto = r.FechaVencimiento?.slice(0,4);
+    if (f.anioDesde && anioVto < f.anioDesde) return false;
+    if (f.anioHasta && anioVto > f.anioHasta) return false;
     if (f.proveedor && !(
       (r.NombreProveedor || '').toLowerCase().includes(f.proveedor) ||
       (r.CUIT || '').includes(f.proveedor)
