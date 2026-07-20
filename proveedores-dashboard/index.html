@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Facturas Pendientes · Señales</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<style>
+  :root {
+    --bg:       #fafbfc;
+    --panel:    #ffffff;
+    --panel2:   #f7f9fc;
+    --soft:     #f1f5f9;
+    --border:   #eef0f3;
+    --divider:  #f1f5f9;
+    --text:     #1f2937;
+    --muted:    #6b7280;
+    --accent:   #4f46e5;
+    --ok:       #10b981;
+    --warn:     #f59e0b;
+    --danger:   #ef4444;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.04), 0 0 0 1px rgba(15,23,42,0.03);
+    --shadow-md: 0 4px 12px rgba(15,23,42,0.05), 0 0 0 1px rgba(15,23,42,0.03);
+    --radius:    12px;
+    --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    padding: 28px 32px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--divider);
+  }
+  h1 { margin: 0 0 4px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  h2 { margin: 0 0 18px; font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -0.005em; }
+  .updated { font-size: 12px; color: var(--muted); font-weight: 500; }
+  .updated span { color: var(--text); font-weight: 600; }
+
+  .filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    background: var(--panel);
+    padding: 18px 20px;
+    border-radius: var(--radius);
+    margin-bottom: 22px;
+    box-shadow: var(--shadow-sm);
+  }
+  .filters label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; font-weight: 500; letter-spacing: 0.01em; }
+  .filters select, .filters input {
+    width: 100%;
+    background: var(--soft);
+    border: 1px solid transparent;
+    color: var(--text);
+    padding: 9px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 500;
+    transition: background 0.15s, border-color 0.15s;
+    outline: none;
+  }
+  .filters select:focus, .filters input:focus {
+    background: var(--panel);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(79,70,229,0.12);
+  }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .kpi { background: var(--panel); padding: 20px 22px; border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+  .kpi .label { font-size: 12px; color: var(--muted); margin-bottom: 10px; font-weight: 500; }
+  .kpi .value { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .kpi .sub   { font-size: 12px; color: var(--muted); margin-top: 6px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .kpi.danger .value { color: var(--danger); }
+  .kpi.warn   .value { color: var(--warn); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 18px; }
+  .grid.wide { grid-template-columns: 1fr; }
+  .card { background: var(--panel); padding: 22px 24px; border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+  .chart-wrap { position: relative; height: 280px; }
+  .chart-wrap.tall { height: 340px; }
+
+  .chart-scroll { overflow-y: auto; overflow-x: hidden; }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  .search-bar { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; }
+  .search-bar input {
+    flex: 1;
+    background: var(--soft);
+    border: 1px solid transparent;
+    color: var(--text);
+    padding: 9px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .search-bar input:focus { background: var(--panel); border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,0.12); }
+  .search-bar input::placeholder { color: var(--muted); }
+  .count-badge {
+    font-size: 12px; color: var(--muted); font-weight: 500; white-space: nowrap;
+    background: var(--soft); padding: 6px 12px; border-radius: 999px;
+  }
+
+  .scroll { overflow-y: auto; max-height: 420px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  th, td { padding: 10px 12px; text-align: right; border-bottom: 1px solid var(--divider); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+  td { font-variant-numeric: tabular-nums; }
+  td:first-child { font-weight: 500; }
+  tbody tr:hover td { background: var(--panel2); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600;
+  }
+  .badge.vencida  { background: rgba(239,68,68,0.10);  color: var(--danger); }
+  .badge.reciente { background: rgba(245,158,11,0.12); color: #b45309; }
+  .badge.vigente  { background: rgba(16,185,129,0.10); color: var(--ok); }
+
+  .mas-info { font-size: 11px; color: var(--muted); margin-top: 8px; text-align: center; }
+
+  .err { color: var(--danger); padding: 40px; text-align: center; font-weight: 500; }
+  @media (max-width: 768px) { body { padding: 16px; } .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Facturas Pendientes de Proveedores · Señales</h1>
+    <div class="updated" id="lastUpdated">Cargando...</div>
+  </div>
+  <div class="updated">
+    Total pendiente: <span id="headerTotal">-</span>
+  </div>
+</header>
+
+<div class="filters">
+  <div>
+    <label>Empresa</label>
+    <select id="filtEmpresa"><option value="">Todas las empresas</option></select>
+  </div>
+  <div>
+    <label>Tipo de comprobante</label>
+    <select id="filtTipo"><option value="">Todos los tipos</option></select>
+  </div>
+  <div>
+    <label>Moneda</label>
+    <select id="filtMoneda"><option value="">Todas</option></select>
+  </div>
+  <div>
+    <label>Estado de vencimiento</label>
+    <select id="filtEstado">
+      <option value="">Todos</option>
+      <option value="vencida">Vencidas</option>
+      <option value="reciente">Vencidas ≤ 30d</option>
+    </select>
+  </div>
+  <div>
+    <label>Buscar proveedor</label>
+    <input type="text" id="filtProveedor" placeholder="Nombre o CUIT...">
+  </div>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Saldo por antigüedad de vencimiento</h2>
+    <div class="chart-wrap"><canvas id="chartAntiguedad"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Top 15 proveedores · saldo pendiente</h2>
+    <div class="chart-scroll" id="scrollProveedores">
+      <div class="chart-wrap tall" id="wrapProveedores"><canvas id="chartProveedores"></canvas></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Saldo pendiente por empresa</h2>
+    <div class="chart-wrap"><canvas id="chartEmpresas"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Distribución por tipo de comprobante</h2>
+    <div class="chart-wrap"><canvas id="chartTipos"></canvas></div>
+  </div>
+</div>
+
+<div class="grid wide" style="margin-top: 18px;">
+  <div class="card">
+    <h2>Detalle de facturas pendientes</h2>
+    <div class="search-bar">
+      <input type="text" id="tablaSearch" placeholder="Buscar en esta tabla...">
+      <div class="count-badge" id="tablaCount">–</div>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Proveedor</th>
+            <th>CUIT</th>
+            <th>Empresa</th>
+            <th>Tipo</th>
+            <th>Comprobante</th>
+            <th>Fecha</th>
+            <th>Vencimiento</th>
+            <th>Días</th>
+            <th style="text-align:right">Saldo</th>
+          </tr>
+        </thead>
+        <tbody id="tablaBody"></tbody>
+      </table>
+    </div>
+    <div class="mas-info" id="masInfo"></div>
+  </div>
+</div>
+
+<script>
+Chart.register(ChartDataLabels);
+Chart.defaults.plugins.datalabels = { display: false };
+Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+Chart.defaults.font.size = 12;
+Chart.defaults.color = '#1f2937';
+Chart.defaults.elements.bar.borderRadius = 5;
+Chart.defaults.elements.bar.borderSkipped = false;
+
+const fmtInt    = n => n == null ? '-' : Math.round(n).toLocaleString('es-AR');
+const fmtMoney  = n => n == null ? '-' : '$ ' + Math.round(n).toLocaleString('es-AR');
+const fmtShort  = n => {
+  if (n == null) return '-';
+  const a = Math.abs(n);
+  if (a >= 1e9) return '$ ' + (n/1e9).toFixed(2) + ' MM';
+  if (a >= 1e6) return '$ ' + (n/1e6).toFixed(1) + ' M';
+  if (a >= 1e3) return '$ ' + (n/1e3).toFixed(0) + ' K';
+  return '$ ' + n.toFixed(0);
+};
+const fmtFecha  = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+
+const LIMIT_TABLE = 500;
+let DATA = null;
+let charts = {};
+
+// ── colores de antigüedad ─────────────────────────────────
+const ANTIGUEDAD_COLORS = {
+  'Vencida 1-30d'  : '#f59e0b',
+  'Vencida 31-60d' : '#f97316',
+  'Vencida 61-90d' : '#ef4444',
+  'Vencida 91-180d': '#dc2626',
+  'Vencida 181d-1a': '#b91c1c',
+  'Vencida >1 año' : '#7f1d1d',
+};
+
+async function loadData() {
+  try {
+    const res = await fetch('data.json?t=' + Date.now());
+    if (!res.ok) throw new Error('No se pudo leer data.json (HTTP ' + res.status + '). Ejecutá export_data.ps1');
+    DATA = await res.json();
+    init();
+  } catch(e) {
+    document.body.innerHTML = '<div class="err">' + e.message + '</div>';
+  }
+}
+
+function init() {
+  document.getElementById('lastUpdated').textContent =
+    'Datos al ' + new Date(DATA.lastUpdated).toLocaleString('es-AR');
+
+  const tot = DATA.totales[0] ?? DATA.totales;
+  document.getElementById('headerTotal').textContent = fmtShort(tot.TotalPendiente);
+
+  // Poblar filtros
+  const selEmp  = document.getElementById('filtEmpresa');
+  const selTipo = document.getElementById('filtTipo');
+  const selMon  = document.getElementById('filtMoneda');
+
+  for (const e of DATA.porEmpresa) {
+    selEmp.innerHTML += `<option value="${e.EmpresaId}">${e.NombreEmpresa}</option>`;
+  }
+  const tipos = [...new Set(DATA.facturas.map(f => f.TipoComprobante).filter(Boolean))].sort();
+  for (const t of tipos) {
+    selTipo.innerHTML += `<option value="${t}">${t}</option>`;
+  }
+  const monedas = [...new Set(DATA.facturas.map(f => f.Moneda).filter(Boolean))].sort();
+  for (const m of monedas) {
+    selMon.innerHTML += `<option value="${m}">${m}</option>`;
+  }
+
+  for (const id of ['filtEmpresa','filtTipo','filtMoneda','filtEstado','filtProveedor']) {
+    document.getElementById(id).addEventListener('input', render);
+  }
+  document.getElementById('tablaSearch').addEventListener('input', renderTabla);
+
+  render();
+}
+
+function getFilters() {
+  return {
+    empresa  : document.getElementById('filtEmpresa').value,
+    tipo     : document.getElementById('filtTipo').value,
+    moneda   : document.getElementById('filtMoneda').value,
+    estado   : document.getElementById('filtEstado').value,
+    proveedor: document.getElementById('filtProveedor').value.trim().toLowerCase(),
+  };
+}
+
+function applyFilters(rows, f) {
+  return rows.filter(r => {
+    if (f.empresa   && r.EmpresaId       !== f.empresa) return false;
+    if (f.tipo      && r.TipoComprobante !== f.tipo)    return false;
+    if (f.moneda    && r.Moneda          !== f.moneda)  return false;
+    if (f.estado === 'vencida'  && r.DiasAtraso <= 0)  return false;
+    if (f.estado === 'reciente' && (r.DiasAtraso <= 0 || r.DiasAtraso > 30)) return false;
+    if (f.proveedor && !(
+      (r.NombreProveedor || '').toLowerCase().includes(f.proveedor) ||
+      (r.CUIT || '').includes(f.proveedor)
+    )) return false;
+    return true;
+  });
+}
+
+function aggregate(rows, keyFn, valFn) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = keyFn(r);
+    m.set(k, (m.get(k) || 0) + valFn(r));
+  }
+  return m;
+}
+
+function render() {
+  const f = getFilters();
+  const rows = applyFilters(DATA.facturas, f);
+
+  // KPIs
+  const totalSaldo = rows.reduce((s,r) => s + (r.SaldoPendiente||0), 0);
+  const cantFact   = rows.length;
+  const cantVenc   = rows.filter(r => r.DiasAtraso > 0).length;
+  const totalVenc  = rows.filter(r => r.DiasAtraso > 0).reduce((s,r) => s + (r.SaldoPendiente||0), 0);
+  const provsUniq  = new Set(rows.map(r => r.CUIT)).size;
+  const diasProm   = cantVenc
+    ? rows.filter(r => r.DiasAtraso > 0).reduce((s,r) => s + r.DiasAtraso, 0) / cantVenc
+    : 0;
+
+  document.getElementById('kpis').innerHTML = [
+    {label: 'Saldo total pendiente',          val: fmtShort(totalSaldo), sub: fmtInt(cantFact) + ' comprobantes', cls: 'danger'},
+    {label: 'Saldo vencido',                   val: fmtShort(totalVenc),  sub: fmtInt(cantVenc) + ' comprobantes vencidos', cls: 'danger'},
+    {label: 'Proveedores con deuda',           val: fmtInt(provsUniq),    sub: null, cls: ''},
+    {label: 'Atraso promedio (vencidas)',       val: Math.round(diasProm) + ' días', sub: null, cls: diasProm > 90 ? 'danger' : 'warn'},
+  ].map(k => `
+    <div class="kpi ${k.cls}">
+      <div class="label">${k.label}</div>
+      <div class="value">${k.val}</div>
+      ${k.sub ? `<div class="sub">${k.sub}</div>` : ''}
+    </div>
+  `).join('');
+
+  destroyCharts();
+
+  // — Antigüedad —
+  const antiguedadOrden = [
+    'Vencida 1-30d','Vencida 31-60d','Vencida 61-90d',
+    'Vencida 91-180d','Vencida 181d-1a','Vencida >1 año'
+  ];
+  const antigMap = aggregate(rows.filter(r => r.DiasAtraso > 0),
+    r => {
+      const d = r.DiasAtraso;
+      if (d <= 30)  return 'Vencida 1-30d';
+      if (d <= 60)  return 'Vencida 31-60d';
+      if (d <= 90)  return 'Vencida 61-90d';
+      if (d <= 180) return 'Vencida 91-180d';
+      if (d <= 365) return 'Vencida 181d-1a';
+      return 'Vencida >1 año';
+    },
+    r => r.SaldoPendiente
+  );
+  const antigLabels = antiguedadOrden.filter(k => antigMap.has(k));
+  const antigVals   = antigLabels.map(k => antigMap.get(k));
+  charts.antiguedad = new Chart(document.getElementById('chartAntiguedad'), {
+    type: 'bar',
+    data: {
+      labels: antigLabels,
+      datasets: [{
+        label: 'Saldo pendiente',
+        data: antigVals,
+        backgroundColor: antigLabels.map(k => ANTIGUEDAD_COLORS[k] || '#94a3b8'),
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          display: true, color: '#1f2937', anchor: 'end', align: 'end', offset: 4,
+          font: { size: 10, weight: 'bold' },
+          formatter: v => fmtShort(v)
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#6b7280' }, grid: { color: '#f1f5f9' } },
+        y: { ticks: { color: '#6b7280', callback: v => fmtShort(v) }, grid: { color: '#f1f5f9' } }
+      }
+    }
+  });
+
+  // — Top proveedores —
+  const provMap = new Map();
+  for (const r of rows) {
+    const k = r.CUIT || r.NombreProveedor;
+    if (!provMap.has(k)) provMap.set(k, { nombre: r.NombreProveedor || r.CUIT, total: 0 });
+    provMap.get(k).total += (r.SaldoPendiente || 0);
+  }
+  const topProv = [...provMap.values()].sort((a,b) => b.total - a.total).slice(0,15);
+  const pHeight = Math.max(340, topProv.length * 26 + 40);
+  document.getElementById('wrapProveedores').style.height = pHeight + 'px';
+  document.getElementById('scrollProveedores').style.height = (Math.min(pHeight, 380)) + 'px';
+  charts.proveedores = new Chart(document.getElementById('chartProveedores'), {
+    type: 'bar',
+    data: {
+      labels: topProv.map(p => p.nombre.length > 32 ? p.nombre.slice(0,32) + '…' : p.nombre),
+      datasets: [{
+        label: 'Saldo',
+        data: topProv.map(p => p.total),
+        backgroundColor: '#4f46e5',
+      }]
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          display: true, color: '#1f2937', anchor: 'end', align: 'end', offset: 4,
+          font: { size: 10, weight: 'bold' },
+          formatter: v => fmtShort(v)
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#6b7280', callback: v => fmtShort(v) }, grid: { color: '#f1f5f9' } },
+        y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#f1f5f9' } }
+      }
+    }
+  });
+
+  // — Por empresa —
+  const empMap = aggregate(rows, r => r.NombreEmpresa || r.EmpresaId, r => r.SaldoPendiente);
+  const empArr = [...empMap.entries()].map(([k,v]) => ({nombre:k,total:v}))
+                                       .sort((a,b) => b.total - a.total);
+  charts.empresas = new Chart(document.getElementById('chartEmpresas'), {
+    type: 'bar',
+    data: {
+      labels: empArr.map(e => e.nombre.length > 22 ? e.nombre.slice(0,22)+'…' : e.nombre),
+      datasets: [{
+        label: 'Saldo',
+        data: empArr.map(e => e.total),
+        backgroundColor: '#8b5cf6',
+      }]
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          display: true, color: '#1f2937', anchor: 'end', align: 'end', offset: 4,
+          font: { size: 10, weight: 'bold' },
+          formatter: v => fmtShort(v)
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#6b7280', callback: v => fmtShort(v) }, grid: { color: '#f1f5f9' } },
+        y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#f1f5f9' } }
+      }
+    }
+  });
+
+  // — Por tipo comprobante (donut) —
+  const tipoMap = aggregate(rows, r => r.TipoComprobante || 'Sin clasificar', r => r.SaldoPendiente);
+  const tipoArr = [...tipoMap.entries()].map(([k,v]) => ({tipo:k,total:v}))
+                                         .sort((a,b) => b.total - a.total).slice(0,8);
+  const TIPO_COLORS = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#f59e0b','#10b981','#06b6d4'];
+  charts.tipos = new Chart(document.getElementById('chartTipos'), {
+    type: 'doughnut',
+    data: {
+      labels: tipoArr.map(t => t.tipo),
+      datasets: [{
+        data: tipoArr.map(t => t.total),
+        backgroundColor: TIPO_COLORS.slice(0, tipoArr.length),
+        borderColor: '#fff', borderWidth: 3, spacing: 2,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { color: '#1f2937', boxWidth: 12 } },
+        datalabels: {
+          display: ctx => {
+            const total = ctx.dataset.data.reduce((s,x) => s+x, 0);
+            return total && ctx.dataset.data[ctx.dataIndex] / total > 0.04;
+          },
+          color: '#fff', font: { size: 11, weight: 'bold' },
+          formatter: (v, ctx) => {
+            const total = ctx.dataset.data.reduce((s,x) => s+x, 0);
+            return (v/total*100).toFixed(0) + '%';
+          }
+        }
+      }
+    }
+  });
+
+  // Tabla
+  renderTabla(rows);
+}
+
+function renderTabla(rowsOrEvent) {
+  const rows = Array.isArray(rowsOrEvent)
+    ? rowsOrEvent
+    : applyFilters(DATA.facturas, getFilters());
+
+  const q = (document.getElementById('tablaSearch').value || '').trim().toLowerCase();
+  const filtered = q
+    ? rows.filter(r =>
+        (r.NombreProveedor||'').toLowerCase().includes(q) ||
+        (r.CUIT||'').includes(q) ||
+        (r.NroComprobante||'').toLowerCase().includes(q) ||
+        (r.NombreEmpresa||'').toLowerCase().includes(q)
+      )
+    : rows;
+
+  const displayed = filtered.slice(0, LIMIT_TABLE);
+  document.getElementById('tablaCount').textContent =
+    fmtInt(displayed.length) + ' de ' + fmtInt(filtered.length);
+  document.getElementById('masInfo').textContent =
+    filtered.length > LIMIT_TABLE
+      ? `Mostrando ${LIMIT_TABLE.toLocaleString('es-AR')} de ${filtered.length.toLocaleString('es-AR')} registros. Usá los filtros para acotar.`
+      : '';
+
+  document.getElementById('tablaBody').innerHTML = displayed.map(r => {
+    const cls = r.DiasAtraso > 90 ? 'vencida' : r.DiasAtraso > 0 ? 'reciente' : 'vigente';
+    const diasText = r.DiasAtraso > 0 ? r.DiasAtraso + 'd' : r.DiasAtraso === 0 ? 'Hoy' : '–';
+    return `<tr>
+      <td>${r.NombreProveedor || '–'}</td>
+      <td>${r.CUIT || '–'}</td>
+      <td>${r.NombreEmpresa || r.EmpresaId}</td>
+      <td>${r.TipoComprobante || '–'}</td>
+      <td>${r.NroComprobante || '–'}</td>
+      <td>${fmtFecha(r.FechaFactura)}</td>
+      <td>${fmtFecha(r.FechaVencimiento)}</td>
+      <td><span class="badge ${cls}">${diasText}</span></td>
+      <td>${fmtMoney(r.SaldoPendiente)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function destroyCharts() {
+  for (const k in charts) { if (charts[k]) charts[k].destroy(); }
+  charts = {};
+}
+
+loadData();
+</script>
+</body>
+</html>
