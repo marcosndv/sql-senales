@@ -169,10 +169,6 @@
     <select id="filtTipo"><option value="">Todos los tipos</option></select>
   </div>
   <div>
-    <label>Moneda</label>
-    <select id="filtMoneda"><option value="">Todas</option></select>
-  </div>
-  <div>
     <label>Vencimiento desde (año)</label>
     <select id="filtAnioDesde"></select>
   </div>
@@ -265,12 +261,12 @@ let charts = {};
 
 // ── colores de antigüedad ─────────────────────────────────
 const ANTIGUEDAD_COLORS = {
-  'Vencida 1-30d'  : '#f59e0b',
-  'Vencida 31-60d' : '#f97316',
-  'Vencida 61-90d' : '#ef4444',
-  'Vencida 91-180d': '#dc2626',
-  'Vencida 181d-1a': '#b91c1c',
-  'Vencida >1 año' : '#7f1d1d',
+  '1-30 días'    : '#f59e0b',
+  '31-60 días'   : '#f97316',
+  '61-90 días'   : '#ef4444',
+  '91-180 días'  : '#dc2626',
+  '181d-1 año'   : '#b91c1c',
+  'Más de 1 año' : '#7f1d1d',
 };
 
 async function loadData() {
@@ -294,7 +290,6 @@ function init() {
   // Poblar filtros
   const selEmp  = document.getElementById('filtEmpresa');
   const selTipo = document.getElementById('filtTipo');
-  const selMon  = document.getElementById('filtMoneda');
 
   for (const e of DATA.porEmpresa) {
     selEmp.innerHTML += `<option value="${e.EmpresaId}">${e.NombreEmpresa}</option>`;
@@ -302,10 +297,6 @@ function init() {
   const tipos = [...new Set(DATA.facturas.map(f => f.TipoComprobante).filter(Boolean))].sort();
   for (const t of tipos) {
     selTipo.innerHTML += `<option value="${t}">${t}</option>`;
-  }
-  const monedas = [...new Set(DATA.facturas.map(f => f.Moneda).filter(Boolean))].sort();
-  for (const m of monedas) {
-    selMon.innerHTML += `<option value="${m}">${m}</option>`;
   }
 
   // Poblar filtros de año
@@ -321,7 +312,7 @@ function init() {
   selDesde.value = String(anioActual - 1);
   selHasta.value = String(anioActual);
 
-  for (const id of ['filtEmpresa','filtTipo','filtMoneda','filtAnioDesde','filtAnioHasta','filtProveedor']) {
+  for (const id of ['filtEmpresa','filtTipo','filtAnioDesde','filtAnioHasta','filtProveedor']) {
     document.getElementById(id).addEventListener('input', render);
   }
   document.getElementById('tablaSearch').addEventListener('input', renderTabla);
@@ -333,7 +324,6 @@ function getFilters() {
   return {
     empresa   : document.getElementById('filtEmpresa').value,
     tipo      : document.getElementById('filtTipo').value,
-    moneda    : document.getElementById('filtMoneda').value,
     anioDesde : document.getElementById('filtAnioDesde').value,
     anioHasta : document.getElementById('filtAnioHasta').value,
     proveedor : document.getElementById('filtProveedor').value.trim().toLowerCase(),
@@ -344,7 +334,6 @@ function applyFilters(rows, f) {
   return rows.filter(r => {
     if (f.empresa  && r.EmpresaId       !== f.empresa) return false;
     if (f.tipo     && r.TipoComprobante !== f.tipo)    return false;
-    if (f.moneda   && r.Moneda          !== f.moneda)  return false;
     const anioVto = r.FechaVencimiento?.slice(0,4);
     if (f.anioDesde && anioVto < f.anioDesde) return false;
     if (f.anioHasta && anioVto > f.anioHasta) return false;
@@ -396,18 +385,18 @@ function render() {
 
   // — Antigüedad —
   const antiguedadOrden = [
-    'Vencida 1-30d','Vencida 31-60d','Vencida 61-90d',
-    'Vencida 91-180d','Vencida 181d-1a','Vencida >1 año'
+    '1-30 días','31-60 días','61-90 días',
+    '91-180 días','181d-1 año','Más de 1 año'
   ];
   const antigMap = aggregate(rows.filter(r => r.DiasAtraso > 0),
     r => {
       const d = r.DiasAtraso;
-      if (d <= 30)  return 'Vencida 1-30d';
-      if (d <= 60)  return 'Vencida 31-60d';
-      if (d <= 90)  return 'Vencida 61-90d';
-      if (d <= 180) return 'Vencida 91-180d';
-      if (d <= 365) return 'Vencida 181d-1a';
-      return 'Vencida >1 año';
+      if (d <= 30)  return '1-30 días';
+      if (d <= 60)  return '31-60 días';
+      if (d <= 90)  return '61-90 días';
+      if (d <= 180) return '91-180 días';
+      if (d <= 365) return '181d-1 año';
+      return 'Más de 1 año';
     },
     r => r.SaldoPendiente
   );

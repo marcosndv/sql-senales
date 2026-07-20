@@ -9,7 +9,6 @@ $out    = Join-Path $PSScriptRoot "data.json"
 function Invoke-SQL($q) {
     $json = & $helper -Format Json $q 2>&1
     $result = $json | ConvertFrom-Json -ErrorAction Stop
-    # Si es un objeto único, envolverlo en array para uniformidad
     if ($result -isnot [array]) { $result = @($result) }
     return $result
 }
@@ -19,66 +18,54 @@ Write-Host "Exportando datos de facturas pendientes..." -ForegroundColor Cyan
 # --- Totales globales ---
 $totales = (Invoke-SQL @"
 SELECT
-  SUM(SaldoPendiente)                                      AS TotalPendiente,
-  COUNT(*)                                                 AS CantFacturas,
-  COUNT(DISTINCT CUIT)                                     AS CantProveedores,
-  COUNT(DISTINCT EmpresaId)                                AS CantEmpresas,
-  SUM(CASE WHEN DiasAtraso > 0 THEN SaldoPendiente ELSE 0 END) AS TotalVencido,
-  SUM(CASE WHEN DiasAtraso > 0 THEN 1 ELSE 0 END)         AS CantVencidas,
-  AVG(CASE WHEN DiasAtraso > 0 THEN CAST(DiasAtraso AS float) END) AS DiasAtrasoPromedio
-FROM dbo.vw_Compras_FacturasPendientes
-WHERE SaldoPendiente > 0
+  SUM(SaldoPendiente)                                                AS TotalPendiente,
+  COUNT(*)                                                           AS CantFacturas,
+  COUNT(DISTINCT CUIT)                                               AS CantProveedores,
+  COUNT(DISTINCT Empresa)                                            AS CantEmpresas,
+  SUM(CASE WHEN DiasVencido > 0 THEN SaldoPendiente ELSE 0 END)     AS TotalVencido,
+  SUM(CASE WHEN DiasVencido > 0 THEN 1             ELSE 0 END)      AS CantVencidas,
+  AVG(CASE WHEN DiasVencido > 0 THEN CAST(DiasVencido AS float) END) AS DiasAtrasoPromedio
+FROM dbo.vw_CtaCte_Proveedores
+WHERE TipoBase = 'OFICIAL' AND SaldoPendiente > 0
 "@)[0]
 
 # --- Por empresa ---
 $porEmpresa = Invoke-SQL @"
 SELECT
-  EmpresaId, NombreEmpresa,
-  COUNT(*)          AS CantFacturas,
-  SUM(SaldoPendiente) AS TotalPendiente
-FROM dbo.vw_Compras_FacturasPendientes
-WHERE SaldoPendiente > 0
-GROUP BY EmpresaId, NombreEmpresa
+  v.Empresa              AS EmpresaId,
+  ce.NombreEmpresa,
+  COUNT(*)               AS CantFacturas,
+  SUM(v.SaldoPendiente)  AS TotalPendiente
+FROM dbo.vw_CtaCte_Proveedores v
+LEFT JOIN dbo.Config_Empresas ce ON ce.Empresa = v.Empresa
+WHERE v.TipoBase = 'OFICIAL' AND v.SaldoPendiente > 0
+GROUP BY v.Empresa, ce.NombreEmpresa
 ORDER BY TotalPendiente DESC
 "@
 
 # --- Por antigüedad ---
 $porAntiguedad = Invoke-SQL @"
 SELECT
-  CASE
-    WHEN DiasAtraso <= 30  THEN 'Vencida 1-30d'
-    WHEN DiasAtraso <= 60  THEN 'Vencida 31-60d'
-    WHEN DiasAtraso <= 90  THEN 'Vencida 61-90d'
-    WHEN DiasAtraso <= 180 THEN 'Vencida 91-180d'
-    WHEN DiasAtraso <= 365 THEN 'Vencida 181d-1a'
-    ELSE                        'Vencida >1 año'
-  END AS Tramo,
-  COUNT(*)            AS CantFacturas,
-  SUM(SaldoPendiente) AS TotalPendiente
-FROM dbo.vw_Compras_FacturasPendientes
-WHERE SaldoPendiente > 0 AND DiasAtraso >= 0
-GROUP BY
-  CASE
-    WHEN DiasAtraso <= 30  THEN 'Vencida 1-30d'
-    WHEN DiasAtraso <= 60  THEN 'Vencida 31-60d'
-    WHEN DiasAtraso <= 90  THEN 'Vencida 61-90d'
-    WHEN DiasAtraso <= 180 THEN 'Vencida 91-180d'
-    WHEN DiasAtraso <= 365 THEN 'Vencida 181d-1a'
-    ELSE                        'Vencida >1 año'
-  END
-ORDER BY MIN(DiasAtraso)
+  TramoVencimiento       AS Tramo,
+  COUNT(*)               AS CantFacturas,
+  SUM(SaldoPendiente)    AS TotalPendiente
+FROM dbo.vw_CtaCte_Proveedores
+WHERE TipoBase = 'OFICIAL' AND SaldoPendiente > 0
+  AND TramoVencimiento NOT IN ('Cancelado', 'A Vencer')
+GROUP BY TramoVencimiento
+ORDER BY MIN(DiasVencido)
 "@
 
 # --- Top 30 proveedores ---
 $topProveedores = Invoke-SQL @"
 SELECT TOP 30
   CUIT,
-  MAX(NombreProveedor)  AS NombreProveedor,
-  COUNT(DISTINCT EmpresaId) AS CantEmpresas,
-  COUNT(*)              AS CantFacturas,
-  SUM(SaldoPendiente)   AS TotalPendiente
-FROM dbo.vw_Compras_FacturasPendientes
-WHERE SaldoPendiente > 0
+  MAX(RazonSocial)        AS NombreProveedor,
+  COUNT(DISTINCT Empresa) AS CantEmpresas,
+  COUNT(*)                AS CantFacturas,
+  SUM(SaldoPendiente)     AS TotalPendiente
+FROM dbo.vw_CtaCte_Proveedores
+WHERE TipoBase = 'OFICIAL' AND SaldoPendiente > 0
 GROUP BY CUIT
 ORDER BY TotalPendiente DESC
 "@
@@ -86,11 +73,22 @@ ORDER BY TotalPendiente DESC
 # --- Por tipo de comprobante ---
 $porTipo = Invoke-SQL @"
 SELECT
-  ISNULL(TipoComprobante, 'Sin clasificar') AS TipoComprobante,
-  COUNT(*)              AS CantFacturas,
-  SUM(SaldoPendiente)   AS TotalPendiente
-FROM dbo.vw_Compras_FacturasPendientes
-WHERE SaldoPendiente > 0
+  CASE TipoComprobante
+    WHEN 1    THEN 'Factura A'
+    WHEN 2    THEN 'Nota Debito A'
+    WHEN 3    THEN 'Nota Credito A'
+    WHEN 6    THEN 'Factura B'
+    WHEN 11   THEN 'Factura C'
+    WHEN 51   THEN 'Factura M'
+    WHEN 81   THEN 'Tique Factura A'
+    WHEN 1001 THEN 'Ajuste CtaCte(+)'
+    WHEN 1002 THEN 'Ajuste CtaCte(-)'
+    ELSE CAST(TipoComprobante AS varchar)
+  END                     AS TipoComprobante,
+  COUNT(*)                AS CantFacturas,
+  SUM(SaldoPendiente)     AS TotalPendiente
+FROM dbo.vw_CtaCte_Proveedores
+WHERE TipoBase = 'OFICIAL' AND SaldoPendiente > 0
 GROUP BY TipoComprobante
 ORDER BY TotalPendiente DESC
 "@
@@ -99,21 +97,32 @@ ORDER BY TotalPendiente DESC
 Write-Host "  Exportando detalle de facturas..." -ForegroundColor Gray
 $facturas = Invoke-SQL @"
 SELECT
-  EmpresaId,
-  NombreEmpresa,
-  NombreProveedor,
-  CUIT,
-  ISNULL(TipoComprobante, 'Sin clasificar') AS TipoComprobante,
-  NroComprobante,
-  CONVERT(varchar(10), FechaFactura,    120) AS FechaFactura,
-  CONVERT(varchar(10), FechaVencimiento,120) AS FechaVencimiento,
-  SaldoPendiente,
-  DiasAtraso,
-  Moneda,
-  ISNULL(Comentario,'')  AS Comentario
-FROM dbo.vw_Compras_FacturasPendientes
-WHERE SaldoPendiente > 0
-ORDER BY DiasAtraso DESC, SaldoPendiente DESC
+  v.Empresa                                      AS EmpresaId,
+  ce.NombreEmpresa,
+  v.RazonSocial                                  AS NombreProveedor,
+  v.CUIT,
+  CASE v.TipoComprobante
+    WHEN 1    THEN 'Factura A'
+    WHEN 2    THEN 'Nota Debito A'
+    WHEN 3    THEN 'Nota Credito A'
+    WHEN 6    THEN 'Factura B'
+    WHEN 11   THEN 'Factura C'
+    WHEN 51   THEN 'Factura M'
+    WHEN 81   THEN 'Tique Factura A'
+    WHEN 1001 THEN 'Ajuste CtaCte(+)'
+    WHEN 1002 THEN 'Ajuste CtaCte(-)'
+    ELSE CAST(v.TipoComprobante AS varchar)
+  END                                            AS TipoComprobante,
+  v.NumeroCompleto                               AS NroComprobante,
+  CONVERT(varchar(10), v.FECHA,            120)  AS FechaFactura,
+  CONVERT(varchar(10), v.FechaVencimiento, 120)  AS FechaVencimiento,
+  v.SaldoPendiente,
+  v.DiasVencido                                  AS DiasAtraso,
+  ISNULL(v.COMENTARIO, '')                       AS Comentario
+FROM dbo.vw_CtaCte_Proveedores v
+LEFT JOIN dbo.Config_Empresas ce ON ce.Empresa = v.Empresa
+WHERE v.TipoBase = 'OFICIAL' AND v.SaldoPendiente > 0
+ORDER BY v.DiasVencido DESC, v.SaldoPendiente DESC
 "@
 
 # --- Armar el JSON final ---
