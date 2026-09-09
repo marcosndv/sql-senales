@@ -40,6 +40,8 @@ aside.sidebar nav a:hover{background:var(--sidebar-hover);color:var(--sidebar-fg
 aside.sidebar nav a.active{background:var(--sidebar-fg-hi);color:var(--sidebar-bg);font-weight:600}
 aside.sidebar nav a .badge-count{margin-left:auto;background:rgba(255,255,255,.08);color:inherit;padding:2px 8px;border-radius:var(--radius-pill);font-size:10px;font-weight:600}
 aside.sidebar nav a.active .badge-count{background:var(--accent);color:#fff}
+aside.sidebar nav .nav-section{padding:14px 14px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#7a9689;margin-top:6px;border-top:1px solid var(--sidebar-hover)}
+aside.sidebar nav .nav-section:first-child{margin-top:0}
 aside.sidebar .foot{position:absolute;bottom:0;padding:16px 24px;font-size:10px;color:#7a9689;border-top:1px solid var(--sidebar-hover);width:100%;text-transform:uppercase;letter-spacing:.15em}
 
 main.content{padding:32px 40px 60px;min-width:0;max-width:1720px;width:100%}
@@ -49,6 +51,8 @@ header.page-header{display:flex;align-items:flex-end;justify-content:space-betwe
 header.page-header h1{margin:0 0 6px;font-family:'Playfair Display',Georgia,serif;font-size:40px;font-weight:500;letter-spacing:-.015em;line-height:1.05;color:var(--text)}
 .updated{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.15em}
 .updated span{color:var(--text);font-weight:700;letter-spacing:.05em}
+.unit-legend{font-size:9.5px;color:var(--muted);font-weight:600;letter-spacing:.12em;text-transform:uppercase;margin-top:4px}
+.unit-legend b{color:var(--text)}
 
 /* Titulares de secciones */
 h2{margin:0 0 16px;font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
@@ -61,12 +65,12 @@ h2{margin:0 0 16px;font-size:10px;font-weight:700;letter-spacing:.18em;text-tran
 .badge.info{background:transparent;color:var(--info);border:1px solid var(--info)}
 
 /* KPIs — estilo editorial: sin cajas fuertes, número grande verde */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0;margin-bottom:32px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
-.kpi{padding:22px 26px;border-right:1px solid var(--divider);border-bottom:1px solid var(--divider)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0;margin-bottom:32px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.kpi{padding:16px 18px;border-right:1px solid var(--divider);border-bottom:1px solid var(--divider);min-width:0}
 .kpi:last-child{border-right:none}
-.kpi .label{font-size:10px;color:var(--muted);margin-bottom:12px;font-weight:700;text-transform:uppercase;letter-spacing:.18em}
-.kpi .value{font-family:'Playfair Display',Georgia,serif;font-size:30px;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--text);line-height:1.1}
-.kpi .sub{font-size:11px;color:var(--muted);margin-top:8px;font-weight:500;font-variant-numeric:tabular-nums;line-height:1.4}
+.kpi .label{font-size:9.5px;color:var(--muted);margin-bottom:8px;font-weight:700;text-transform:uppercase;letter-spacing:.15em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi .value{font-family:'Playfair Display',Georgia,serif;font-size:24px;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--text);line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi .sub{font-size:10.5px;color:var(--muted);margin-top:6px;font-weight:500;font-variant-numeric:tabular-nums;line-height:1.35;overflow:hidden}
 .value.pos{color:var(--accent)}
 .value.neg{color:var(--danger)}
 .kpi.pos .value{color:var(--accent)}
@@ -97,9 +101,13 @@ tr.total td{font-weight:700;border-top:2px solid var(--text);background:transpar
 tr.group-header td{background:var(--soft);font-weight:600;color:var(--accent);cursor:pointer;text-transform:uppercase;letter-spacing:.08em;font-size:11px}
 tr.group-child.hidden{display:none}
 .hidden{display:none !important}
-.scroll{max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--panel)}
+.scroll{max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--panel)}
 .scroll.tall{max-height:520px}
 .scroll.tall.matriz-wrap{max-height:640px;overflow:auto}
+.scroll table{width:100%;table-layout:auto}
+.scroll table th,.scroll table td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px}
+.scroll table td.num,.scroll table th.num{max-width:none;overflow:visible}
+.scroll table thead th{position:sticky;top:0;background:var(--panel);z-index:2;box-shadow:0 1px 0 var(--border)}
 
 /* Matriz préstamos × meses */
 table.matriz{border-collapse:separate;border-spacing:0;font-size:11px}

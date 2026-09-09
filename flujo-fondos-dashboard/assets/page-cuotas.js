@@ -189,7 +189,7 @@ function renderPageCuotas(opts) {
             <td class="num muted">${c.NroCuota||''}</td>
             <td>${fmtDate(c.FechaVto)}</td>
             <td class="num ${c.DiasAlPago<=7?'warn':'muted'}" data-sort-val="${c.DiasAlPago}">${c.DiasAlPago}</td>
-            <td class="num" data-sort-val="${+c.ImporteCuota||0}"><b>${fmtSg(+c.ImporteCuota)}</b></td>
+            <td class="num" data-sort-val="${+c.ImporteCuota||0}"><b>${fmtSgFull(+c.ImporteCuota)}</b></td>
             <td>${alertaBadge}</td>
           </tr>`;
         }).join('')}

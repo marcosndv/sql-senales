@@ -246,7 +246,7 @@ function redrawCheques() {
         <td>${fmtDate(c.FechaPagoDiferido)}</td>
         <td class="num ${c.DiasAlPago<=7?'warn':'muted'}" data-sort-val="${c.DiasAlPago}">${c.DiasAlPago}</td>
         <td>${c.Beneficiario||'<span class="muted">(sin beneficiario)</span>'}</td>
-        <td class="num" data-sort-val="${+c.Importe||0}"><b>${fmtSg(+c.Importe)}</b></td>
+        <td class="num" data-sort-val="${+c.Importe||0}"><b>${fmtSgFull(+c.Importe)}</b></td>
       </tr>`).join('')}
       ${filtrados.length > 2000 ? `<tr><td colspan="9" class="muted" style="text-align:center;padding:12px">(mostrando primeros 2000 de ${filtrados.length} — filtrá para acotar)</td></tr>` : ''}
     </tbody>`;

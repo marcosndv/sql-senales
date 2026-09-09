@@ -292,7 +292,7 @@ function renderVistaLista(rows) {
         <td>${fmtDate(f.FechaFactura)}</td>
         <td>${fmtDate(f.FechaVencimiento)}</td>
         <td class="num ${f.DiasAtraso>0 && !esNC ?'neg':'muted'}">${f.DiasAtraso}</td>
-        <td class="num ${esNC?'pos':''}" data-sort-val="${+f.SaldoPendiente||0}"><b>${fmtSg(+f.SaldoPendiente)}</b></td>
+        <td class="num ${esNC?'pos':''}" data-sort-val="${+f.SaldoPendiente||0}"><b>${fmtSgFull(+f.SaldoPendiente)}</b></td>
         <td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(f.Comentario||'').substring(0,80)}</td>
       </tr>`;}).join('')}
       ${rows.length > 2000 ? `<tr><td colspan="9" class="muted" style="text-align:center;padding:12px">(mostrando primeras 2000 de ${rows.length} — filtrá para acotar)</td></tr>` : ''}
@@ -321,7 +321,7 @@ function renderVistaAgrupada(rows) {
       <td>${fmtDate(f.FechaFactura)}</td>
       <td>${fmtDate(f.FechaVencimiento)}</td>
       <td class="num ${f.DiasAtraso>0?'neg':'muted'}">${f.DiasAtraso}</td>
-      <td class="num">${fmtSg(+f.SaldoPendiente)}</td>
+      <td class="num">${fmtSgFull(+f.SaldoPendiente)}</td>
       <td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(f.Comentario||'').substring(0,60)}</td>
     </tr>`).join('');
     return `<tr class="group-header" onclick="toggleGroup('${gid}', this)">

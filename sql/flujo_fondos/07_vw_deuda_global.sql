@@ -42,6 +42,16 @@ Base AS (
     FROM dbo.vw_FlujoFondos_Prestamos fp
     WHERE fp.FechaVto IS NOT NULL
       AND ISNULL(fp.ImporteCuota, 0) > 0
+
+    UNION ALL
+
+    -- Deudas impositivas sueltas (IMPOSITIVO)
+    SELECT
+        i.Empresa                                       AS Empresa,
+        'Impositivo'                                    AS Origen,
+        i.Importe                                       AS Deuda,
+        i.FechaVto                                      AS FechaVto
+    FROM dbo.vw_FlujoFondos_Impositivo i
 )
 SELECT
     b.Empresa,

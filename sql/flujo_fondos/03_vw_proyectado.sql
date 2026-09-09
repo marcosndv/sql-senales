@@ -111,6 +111,24 @@ Base AS (
         'vw_FlujoFondos_Prestamos'                             AS FuenteTabla
     FROM dbo.vw_FlujoFondos_Prestamos fp
     WHERE fp.FechaVto IS NOT NULL
+
+    UNION ALL
+
+    -- Salidas: deudas impositivas sueltas pendientes (IMPOSITIVO — no PAGO ni PLAN DE PAGO).
+    SELECT
+        i.FechaVto                                            AS Fecha,
+        i.Empresa                                             AS Empresa,
+        NULL                                                  AS RazonSocial,
+        'SALIDA'                                              AS Tipo,
+        'Impositivo'                                          AS Origen,
+        CONCAT('Deuda impositiva - ', ISNULL(i.Grupo,'')) AS Concepto,
+        CONCAT(i.Grupo, ' ', ISNULL(i.Subconcepto,''),
+               CASE WHEN i.Periodo IS NOT NULL
+                    THEN ' - ' + FORMAT(i.Periodo, 'yyyy-MM') ELSE '' END) AS Detalle,
+        i.Importe                                             AS Importe,
+        'vw_FlujoFondos_Impositivo'                           AS FuenteTabla
+    FROM dbo.vw_FlujoFondos_Impositivo i
+    WHERE i.FechaVto IS NOT NULL
 )
 SELECT
     -- Los vencidos se acumulan en "hoy" para no perderlos del proyectado

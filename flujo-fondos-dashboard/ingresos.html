@@ -219,7 +219,7 @@ function redrawMovs() {
         <td class="muted">${m.Detalle||m.Concepto||''}</td>
         <td>${fmtDate(m.Fecha)}</td>
         <td class="num ${m.DiasACobrar<=7?'pos':'muted'}" data-sort-val="${m.DiasACobrar}">${m.DiasACobrar}</td>
-        <td class="num pos" data-sort-val="${+m.Importe||0}"><b>${fmtSg(+m.Importe)}</b></td>
+        <td class="num pos" data-sort-val="${+m.Importe||0}"><b>${fmtSgFull(+m.Importe)}</b></td>
       </tr>`).join('')}
       ${filtrados.length > 2000 ? `<tr><td colspan="6" class="muted" style="text-align:center;padding:12px">(mostrando primeros 2000 de ${filtrados.length} — filtrá para acotar)</td></tr>` : ''}
     </tbody>`;

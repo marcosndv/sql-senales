@@ -17,7 +17,8 @@ param(
     [switch]$SoloBancos,
     [switch]$SoloTarjetas,
     [switch]$SoloPrestamos,
-    [switch]$SoloPlanes
+    [switch]$SoloPlanes,
+    [switch]$SoloImpositivo
 )
 
 $ErrorActionPreference = 'Stop'
@@ -389,24 +390,94 @@ FROM dbo.Manual_PlanesArca WHERE _archivoOrigen = $(SqlStr $archivo);
     } finally { Close-Excel $ctx }
 }
 
+function Ingest-Impositivo {
+    param([string]$Path)
+    Write-Host "► IMPOSITIVO: $Path" -ForegroundColor Cyan
+    $ctx = Open-ExcelReadOnly -Path $Path
+    try {
+        $ws = $ctx.Book.Worksheets.Item('IMPOSITIVO')
+        $filas = $ws.UsedRange.Rows.Count
+        # Cols (header R3): 1:RazonSocial 2:Grupo 3:Concepto 4:Subconcepto 5:Periodo(date)
+        # 6:Vencimiento(date) 7:Importe 8:Estado 9:Condicion 10:DiasMora 11:Registracion 12:Op 13:Observacion
+        $registros = @()
+        for ($r = 4; $r -le $filas; $r++) {
+            $rs = ([string]$ws.Cells.Item($r, 1).Text).Trim()
+            $imp = $ws.Cells.Item($r, 7).Value2
+            if ([string]::IsNullOrWhiteSpace($rs) -or $null -eq $imp) { continue }
+            $registros += [pscustomobject]@{
+                RazonSocial   = $rs
+                Grupo         = ([string]$ws.Cells.Item($r, 2).Text).Trim()
+                Concepto      = ([string]$ws.Cells.Item($r, 3).Text).Trim()
+                Subconcepto   = ([string]$ws.Cells.Item($r, 4).Text).Trim()
+                Periodo       = ConvertTo-SqlDate $ws.Cells.Item($r, 5).Value2
+                Vencimiento   = ConvertTo-SqlDate $ws.Cells.Item($r, 6).Value2
+                Importe       = ConvertTo-SqlDecimal $imp
+                Estado        = ([string]$ws.Cells.Item($r, 8).Text).Trim()
+                Condicion     = ([string]$ws.Cells.Item($r, 9).Text).Trim()
+                DiasMora      = [int]([string]$ws.Cells.Item($r,10).Text -replace '[^\d\-]', '' -replace '^$','0')
+                Registracion  = ([string]$ws.Cells.Item($r,11).Text).Trim()
+                Op            = ([string]$ws.Cells.Item($r,12).Text).Trim()
+                Observacion   = ([string]$ws.Cells.Item($r,13).Text).Trim()
+            }
+        }
+        Write-Host "  Leídas $($registros.Count) filas útiles" -ForegroundColor Gray
+        if ($registros.Count -eq 0) { throw "No se pudo leer ninguna fila de IMPOSITIVO" }
+
+        $archivo = Split-Path $Path -Leaf
+        $rows = ($registros | ForEach-Object {
+            $per = if ($_.Periodo)     { SqlStr $_.Periodo }     else { 'NULL' }
+            $ven = if ($_.Vencimiento) { SqlStr $_.Vencimiento } else { 'NULL' }
+            "($(SqlStr $_.RazonSocial), $(SqlStr $_.Grupo), $(SqlStr $_.Concepto), $(SqlStr $_.Subconcepto), $per, $ven, $($_.Importe), $(SqlStr $_.Estado), $(SqlStr $_.Condicion), $($_.DiasMora), $(SqlStr $_.Registracion), $(SqlStr $_.Op), $(SqlStr $_.Observacion), $(SqlStr $archivo))"
+        }) -join ",`n"
+
+        $sql = @"
+DELETE FROM dbo.Manual_Impositivo WHERE _archivoOrigen = $(SqlStr $archivo);
+
+INSERT INTO dbo.Manual_Impositivo
+    (RazonSocialExcel, Grupo, Concepto, Subconcepto, Periodo, FechaVencimiento,
+     Importe, Estado, Condicion, DiasMora, Registracion, OrdenPago, Observacion, _archivoOrigen)
+SELECT RazonSocialExcel, Grupo, Concepto, Subconcepto,
+       CAST(Periodo AS DATE), CAST(FechaVencimiento AS DATE),
+       Importe, Estado, Condicion, DiasMora, Registracion, OrdenPago, Observacion, _archivoOrigen
+FROM (VALUES
+$rows
+) v (RazonSocialExcel, Grupo, Concepto, Subconcepto, Periodo, FechaVencimiento,
+     Importe, Estado, Condicion, DiasMora, Registracion, OrdenPago, Observacion, _archivoOrigen);
+
+SELECT COUNT(*) AS Total,
+       SUM(CASE WHEN Estado='PENDIENTE' THEN 1 ELSE 0 END) AS Pendientes,
+       SUM(CASE WHEN Estado='PAGO'      THEN 1 ELSE 0 END) AS Pagos,
+       SUM(CASE WHEN Estado='PLAN DE PAGO' THEN 1 ELSE 0 END) AS EnPlan,
+       SUM(CASE WHEN Estado='PENDIENTE' THEN Importe ELSE 0 END) AS ImportePendiente
+FROM dbo.Manual_Impositivo WHERE _archivoOrigen = $(SqlStr $archivo);
+"@
+        $r = Invoke-SqlScalar $sql
+        Write-Host ("  Insertadas: {0}  (Pendientes: {1}, Pagos: {2}, EnPlan: {3}, `$ pendiente: {4})" -f $r.Total, $r.Pendientes, $r.Pagos, $r.EnPlan, $r.ImportePendiente) -ForegroundColor Green
+        return @{ Filas = $registros.Count; Pendientes = $r.Pendientes; ImportePendiente = $r.ImportePendiente }
+    } finally { Close-Excel $ctx }
+}
+
 # --------- Main --------------------------------------------------------------
 
-$soloFlag = $SoloBancos -or $SoloTarjetas -or $SoloPrestamos -or $SoloPlanes
-$hazBancos    = -not $soloFlag -or $SoloBancos
-$hazTarjetas  = -not $soloFlag -or $SoloTarjetas
-$hazPrestamos = -not $soloFlag -or $SoloPrestamos
-$hazPlanes    = -not $soloFlag -or $SoloPlanes
+$soloFlag = $SoloBancos -or $SoloTarjetas -or $SoloPrestamos -or $SoloPlanes -or $SoloImpositivo
+$hazBancos     = -not $soloFlag -or $SoloBancos
+$hazTarjetas   = -not $soloFlag -or $SoloTarjetas
+$hazPrestamos  = -not $soloFlag -or $SoloPrestamos
+$hazPlanes     = -not $soloFlag -or $SoloPlanes
+$hazImpositivo = -not $soloFlag -or $SoloImpositivo
 
-$resumen = @{ Bancos = $null; Tarjetas = $null; Prestamos = $null; Planes = $null }
+$resumen = @{ Bancos = $null; Tarjetas = $null; Prestamos = $null; Planes = $null; Impositivo = $null }
 
-if ($hazBancos)    { $resumen.Bancos    = Ingest-Bancos    -Path $PathBancos }
-if ($hazTarjetas)  { $resumen.Tarjetas  = Ingest-Tarjetas  -Path $PathTarjetas }
-if ($hazPrestamos) { $resumen.Prestamos = Ingest-Prestamos -Path $PathPrestamos }
-if ($hazPlanes)    { $resumen.Planes    = Ingest-Planes    -Path $PathPlanes }
+if ($hazBancos)     { $resumen.Bancos     = Ingest-Bancos     -Path $PathBancos }
+if ($hazTarjetas)   { $resumen.Tarjetas   = Ingest-Tarjetas   -Path $PathTarjetas }
+if ($hazPrestamos)  { $resumen.Prestamos  = Ingest-Prestamos  -Path $PathPrestamos }
+if ($hazPlanes)     { $resumen.Planes     = Ingest-Planes     -Path $PathPlanes }
+if ($hazImpositivo) { $resumen.Impositivo = Ingest-Impositivo -Path $PathPlanes }
 
 Write-Host "`n=== Resumen ingesta ===" -ForegroundColor Cyan
-if ($resumen.Bancos)    { Write-Host ("  Bancos:    {0} filas, fechas: {1}" -f $resumen.Bancos.Filas, ($resumen.Bancos.Fechas -join ', ')) }
-if ($resumen.Tarjetas)  { Write-Host ("  Tarjetas:  {0} filas" -f $resumen.Tarjetas.Filas) }
-if ($resumen.Prestamos) { Write-Host ("  Prestamos: {0} filas ({1} por vencer)" -f $resumen.Prestamos.Filas, $resumen.Prestamos.PorVencer) }
-if ($resumen.Planes)    { Write-Host ("  Planes:    {0} filas ({1} vig. por vencer, {2} caducos)" -f $resumen.Planes.Filas, $resumen.Planes.PorVencer, $resumen.Planes.Caducos) }
+if ($resumen.Bancos)     { Write-Host ("  Bancos:     {0} filas, fechas: {1}" -f $resumen.Bancos.Filas, ($resumen.Bancos.Fechas -join ', ')) }
+if ($resumen.Tarjetas)   { Write-Host ("  Tarjetas:   {0} filas" -f $resumen.Tarjetas.Filas) }
+if ($resumen.Prestamos)  { Write-Host ("  Prestamos:  {0} filas ({1} por vencer)" -f $resumen.Prestamos.Filas, $resumen.Prestamos.PorVencer) }
+if ($resumen.Planes)     { Write-Host ("  Planes:     {0} filas ({1} vig. por vencer, {2} caducos)" -f $resumen.Planes.Filas, $resumen.Planes.PorVencer, $resumen.Planes.Caducos) }
+if ($resumen.Impositivo) { Write-Host ("  Impositivo: {0} filas ({1} pendientes, `$ {2})" -f $resumen.Impositivo.Filas, $resumen.Impositivo.Pendientes, $resumen.Impositivo.ImportePendiente) }
 Write-Host "OK" -ForegroundColor Green

@@ -108,6 +108,7 @@ $counterPrestamos   = (Invoke-SQL "SELECT COUNT(*) AS N FROM vw_FlujoFondos_Pres
 $counterPlanes      = (Invoke-SQL "SELECT COUNT(*) AS N FROM vw_FlujoFondos_Prestamos WHERE Origen     LIKE 'Planes%' AND FechaVto >= CAST(GETDATE() AS DATE)")[0].N
 $counterIngresos    = (Invoke-SQL "SELECT COUNT(*) AS N FROM vw_FlujoFondos_Proyectado WHERE Tipo='ENTRADA' AND EsVencido=0")[0].N
 $counterCobranzas   = (Invoke-SQL "SELECT COUNT(*) AS N FROM (SELECT CUIT FROM vw_CtaCte_Clientes WHERE TipoBase='OFICIAL' AND FECHA >= DATEADD(month, -36, GETDATE()) GROUP BY CUIT HAVING SUM(SaldoPendiente) > 0) x")[0].N
+$counterImpositivo  = (Invoke-SQL "SELECT COUNT(*) AS N FROM vw_FlujoFondos_Impositivo")[0].N
 
 $sidebarCounters = @{
     proveedores    = $counterProveedores
@@ -116,6 +117,7 @@ $sidebarCounters = @{
     planes         = $counterPlanes
     ingresos       = $counterIngresos
     cobranzas      = $counterCobranzas
+    impositivo     = $counterImpositivo
 }
 
 $dataInicio = [ordered]@{
@@ -685,6 +687,61 @@ $dataConsolidado = [ordered]@{
 }
 
 # ================================================================
+#  data-impositivo.json — deudas impositivas sueltas pendientes
+# ================================================================
+
+$impTotales = (Invoke-SQL @"
+SELECT
+    COUNT(*)                                                AS CantItems,
+    SUM(Importe)                                            AS TotalPendiente,
+    SUM(CASE WHEN FechaVencimiento < CAST(GETDATE() AS DATE) THEN Importe ELSE 0 END) AS TotalVencido,
+    SUM(CASE WHEN FechaVencimiento >= CAST(GETDATE() AS DATE) THEN Importe ELSE 0 END) AS TotalAVencer,
+    COUNT(DISTINCT Empresa)                                 AS CantEmpresas,
+    COUNT(DISTINCT Grupo)                                   AS CantGrupos
+FROM vw_FlujoFondos_Impositivo
+"@)[0]
+
+$impPorGrupo = Invoke-SQL @"
+SELECT Grupo, COUNT(*) AS Cant, SUM(Importe) AS Total,
+       SUM(CASE WHEN FechaVencimiento < CAST(GETDATE() AS DATE) THEN Importe ELSE 0 END) AS Vencido
+FROM vw_FlujoFondos_Impositivo
+GROUP BY Grupo
+ORDER BY Total DESC
+"@
+
+$impPorEmpresa = Invoke-SQL @"
+SELECT Empresa AS EmpresaId, MAX(NombreEmpresa) AS NombreEmpresa,
+       COUNT(*) AS Cant,
+       SUM(Importe) AS Total,
+       SUM(CASE WHEN FechaVencimiento < CAST(GETDATE() AS DATE) THEN Importe ELSE 0 END) AS Vencido
+FROM vw_FlujoFondos_Impositivo
+GROUP BY Empresa
+ORDER BY Total DESC
+"@
+
+$impDetalle = Invoke-SQL @"
+SELECT i.EmpresaExcel, i.NombreEmpresa,
+       i.Grupo, i.Concepto, i.Subconcepto,
+       CONVERT(varchar(10), i.Periodo, 120) AS Periodo,
+       CONVERT(varchar(10), i.FechaVencimiento, 120) AS FechaVencimiento,
+       i.Importe,
+       DATEDIFF(day, CAST(GETDATE() AS DATE), i.FechaVto) AS DiasAlVto,
+       CASE WHEN i.FechaVencimiento < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS EsVencida,
+       i.DiasMora, ISNULL(i.Observacion, '') AS Observacion
+FROM vw_FlujoFondos_Impositivo i
+ORDER BY i.FechaVto, i.Importe DESC
+"@
+
+$dataImpositivo = [ordered]@{
+    lastUpdated = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
+    totales     = $impTotales
+    porGrupo    = $impPorGrupo
+    porEmpresa  = $impPorEmpresa
+    detalle     = $impDetalle
+    counters    = $sidebarCounters
+}
+
+# ================================================================
 #  Escribir los 8 JSON
 # ================================================================
 $outInicio       = Join-Path $PSScriptRoot 'data-inicio.json'
@@ -696,6 +753,7 @@ $outIngresos     = Join-Path $PSScriptRoot 'data-ingresos.json'
 $outCobranzas    = Join-Path $PSScriptRoot 'data-cobranzas.json'
 $outDeudaGlobal  = Join-Path $PSScriptRoot 'data-deuda-global.json'
 $outConsolidado  = Join-Path $PSScriptRoot 'data-consolidado.json'
+$outImpositivo   = Join-Path $PSScriptRoot 'data-impositivo.json'
 
 $dataInicio      | ConvertTo-Json -Depth 6 -Compress | Set-Content $outInicio -Encoding UTF8
 $dataProveedores | ConvertTo-Json -Depth 6 -Compress | Set-Content $outProv -Encoding UTF8
@@ -706,6 +764,7 @@ $dataIngresos    | ConvertTo-Json -Depth 6 -Compress | Set-Content $outIngresos 
 $dataCobranzas   | ConvertTo-Json -Depth 6 -Compress | Set-Content $outCobranzas -Encoding UTF8
 $dataDeudaGlobal | ConvertTo-Json -Depth 6 -Compress | Set-Content $outDeudaGlobal -Encoding UTF8
 $dataConsolidado | ConvertTo-Json -Depth 6 -Compress | Set-Content $outConsolidado -Encoding UTF8
+$dataImpositivo  | ConvertTo-Json -Depth 6 -Compress | Set-Content $outImpositivo -Encoding UTF8
 
 # Legacy: mantenemos data.json apuntando al inicio por compatibilidad con corridas viejas
 Copy-Item $outInicio (Join-Path $PSScriptRoot 'data.json') -Force
@@ -720,3 +779,4 @@ Write-Host ("OK → data-ingresos.json        ({0} KB)" -f (KB $outIngresos))  -
 Write-Host ("OK → data-cobranzas.json       ({0} KB)" -f (KB $outCobranzas)) -ForegroundColor Green
 Write-Host ("OK → data-deuda-global.json    ({0} KB)" -f (KB $outDeudaGlobal)) -ForegroundColor Green
 Write-Host ("OK → data-consolidado.json     ({0} KB)" -f (KB $outConsolidado)) -ForegroundColor Green
+Write-Host ("OK → data-impositivo.json      ({0} KB)" -f (KB $outImpositivo))  -ForegroundColor Green

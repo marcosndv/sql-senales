@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Flujo de Fondos · Impositivo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body data-page="impositivo">
+
+<main class="content">
+  <header class="page-header">
+    <div>
+      <h1>Deuda impositiva pendiente</h1>
+      <div class="updated">Últ. actualización: <span id="lastUpdated">-</span> · Fuente: <span class="badge info">Excel IMPOSITIVO</span> · solo items con ESTADO=PENDIENTE</div>
+    </div>
+    <div><button class="btn" onclick="location.reload()">Recargar</button></div>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Por grupo impositivo</h2>
+      <div class="chart-wrap"><canvas id="chartGrupo"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Por empresa</h2>
+      <div class="scroll"><table id="tblEmpresas"></table></div>
+    </div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Detalle</h2>
+      <div class="filters">
+        <input type="text" id="fEmpresa" list="dlEmpresa" placeholder="Empresa" autocomplete="off">
+        <datalist id="dlEmpresa"></datalist>
+        <select id="fGrupo"><option value="">Todo grupo</option></select>
+        <select id="fEstado">
+          <option value="">Todo</option>
+          <option value="vencidas">Vencidas</option>
+          <option value="a-vencer">A vencer</option>
+        </select>
+        <input type="text" id="fBusqueda" placeholder="Buscar en concepto / observación...">
+        <span id="fResumen" class="muted"></span>
+      </div>
+      <div class="scroll tall"><table id="tblDetalle"></table></div>
+    </div>
+  </div>
+</main>
+
+<script src="assets/layout.js"></script>
+<script>
+let DATA = null;
+let chartGrp = null;
+
+fetchPageData(d => {
+  DATA = d;
+  renderSidebar({
+    proveedores: DATA.counters?.proveedores ?? '',
+    'cheques-propios': DATA.counters?.chequesPropios ?? '',
+    prestamos: DATA.counters?.prestamos ?? '',
+    planes: DATA.counters?.planes ?? '',
+    ingresos: DATA.counters?.ingresos ?? '',
+    cobranzas: DATA.counters?.cobranzas ?? '',
+    impositivo: DATA.counters?.impositivo ?? ''
+  });
+  render();
+});
+
+function render() {
+  document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);
+  renderKpis();
+  renderChartGrupo();
+  renderTablaEmpresas();
+  initFiltros();
+  redrawDetalle();
+}
+
+function renderKpis() {
+  const t = DATA.totales;
+  const k = [
+    {label:'Deuda impositiva total', value:t.TotalPendiente, type:'neg',  sub:`${fmt(t.CantItems)} items · ${fmt(t.CantEmpresas)} empresas`},
+    {label:'Vencido',                value:t.TotalVencido,   type:'neg',  sub:'con vencimiento pasado'},
+    {label:'A vencer',               value:t.TotalAVencer,   type:'warn', sub:'sin vencer aún'},
+    {label:'Grupos',                 value:null, type:'info', sub:`${fmt(t.CantGrupos)} grupos (IVA, F-931, IIBB, ...)`},
+  ];
+  document.getElementById('kpis').innerHTML = k.map(x => `
+    <div class="kpi ${x.type}">
+      <div class="label">${x.label}</div>
+      <div class="value">${x.value!=null ? fmtSg(x.value) : x.sub.split(' ')[0]}</div>
+      <div class="sub">${x.value!=null ? x.sub : ''}</div>
+    </div>`).join('');
+}
+
+function renderChartGrupo() {
+  const rows = DATA.porGrupo || [];
+  const labels = rows.map(r => r.Grupo || '(sin grupo)');
+  const data = rows.map(r => +r.Total || 0);
+  const colors = labels.map((_,i) => ['#8f2a2a','#a67c11','#2c5c78','#6b4a68','#0f5c3a','#7a4b3a','#4b6a5a','#6a2a68','#4b3a2a'][i%9]);
+  if (chartGrp) chartGrp.destroy();
+  chartGrp = new Chart(document.getElementById('chartGrupo'), {
+    type:'bar',
+    data:{labels, datasets:[{data, backgroundColor:colors, borderRadius:6}]},
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtSg(c.parsed.x)}}},
+      scales:{x:{ticks:{callback:v=>fmt(v/1e6)+' M'}}}
+    }
+  });
+}
+
+function renderTablaEmpresas() {
+  const rows = DATA.porEmpresa || [];
+  const tot = rows.reduce((a,r)=>({T:a.T+(+r.Total||0), V:a.V+(+r.Vencido||0), N:a.N+(+r.Cant||0)}),{T:0,V:0,N:0});
+  document.getElementById('tblEmpresas').innerHTML = `
+    <thead><tr><th>Empresa</th><th class="num">Items</th><th class="num">Total</th><th class="num">Vencido</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr onclick="filtrarPorEmpresa('${r.NombreEmpresa||r.EmpresaId}')" style="cursor:pointer">
+        <td>${r.NombreEmpresa || r.EmpresaId}</td>
+        <td class="num">${r.Cant}</td>
+        <td class="num"><b>${fmtSg(+r.Total)}</b></td>
+        <td class="num ${(+r.Vencido)>0?'neg':'muted'}">${fmtSg(+r.Vencido)}</td>
+      </tr>`).join('')}
+      <tr class="total"><td>TOTAL</td><td class="num">${tot.N}</td><td class="num">${fmtSg(tot.T)}</td><td class="num neg">${fmtSg(tot.V)}</td></tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblEmpresas'));
+}
+
+function initFiltros() {
+  const empresas = [...new Set(DATA.detalle.map(f => f.NombreEmpresa || f.EmpresaExcel).filter(Boolean))].sort();
+  const grupos = [...new Set(DATA.detalle.map(f => f.Grupo).filter(Boolean))].sort();
+  document.getElementById('dlEmpresa').innerHTML = empresas.map(e=>`<option value="${e}">`).join('');
+  const sel = document.getElementById('fGrupo');
+  grupos.forEach(g => { const o=document.createElement('option'); o.value=g; o.textContent=g; sel.appendChild(o); });
+  ['fEmpresa','fGrupo','fEstado','fBusqueda'].forEach(id => {
+    document.getElementById(id).oninput = redrawDetalle;
+    document.getElementById(id).onchange = redrawDetalle;
+  });
+}
+
+function filtrarPorEmpresa(nombre) {
+  document.getElementById('fEmpresa').value = nombre;
+  redrawDetalle();
+  document.getElementById('tblDetalle').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function aplicarFiltros() {
+  const fe = document.getElementById('fEmpresa').value.trim().toLowerCase();
+  const fg = document.getElementById('fGrupo').value;
+  const fs = document.getElementById('fEstado').value;
+  const fq = document.getElementById('fBusqueda').value.trim().toLowerCase();
+  return DATA.detalle.filter(f => {
+    if (fe && ((f.NombreEmpresa||f.EmpresaExcel)||'').toLowerCase().indexOf(fe) < 0) return false;
+    if (fg && f.Grupo !== fg) return false;
+    if (fs === 'vencidas' && +f.EsVencida !== 1) return false;
+    if (fs === 'a-vencer' && +f.EsVencida === 1) return false;
+    if (fq) {
+      const t = ((f.Concepto||'')+' '+(f.Subconcepto||'')+' '+(f.Observacion||'')).toLowerCase();
+      if (t.indexOf(fq) < 0) return false;
+    }
+    return true;
+  });
+}
+
+function redrawDetalle() {
+  const rows = aplicarFiltros();
+  const totImp = rows.reduce((s,r)=>s+(+r.Importe||0),0);
+  const totVen = rows.filter(r=>+r.EsVencida===1).reduce((s,r)=>s+(+r.Importe||0),0);
+  document.getElementById('fResumen').innerHTML = `<b>${rows.length}</b> items · Total <b>${fmtSg(totImp)}</b> · Vencido <b class="neg">${fmtSg(totVen)}</b>`;
+  document.getElementById('tblDetalle').innerHTML = `
+    <thead><tr>
+      <th>Empresa</th><th>Grupo</th><th>Concepto</th><th>Subconcepto</th>
+      <th>Período</th><th>Vencimiento</th><th class="num">Días</th><th class="num">Importe</th><th>Observación</th>
+    </tr></thead>
+    <tbody>
+      ${rows.slice(0, 2000).map(f=>{
+        const vencida = +f.EsVencida === 1;
+        return `<tr>
+          <td>${f.NombreEmpresa||f.EmpresaExcel}</td>
+          <td><span class="badge info">${f.Grupo||''}</span></td>
+          <td>${f.Concepto||''}</td>
+          <td class="muted">${f.Subconcepto||''}</td>
+          <td>${fmtDate(f.Periodo)}</td>
+          <td>${fmtDate(f.FechaVencimiento)}</td>
+          <td class="num ${vencida?'neg':'muted'}">${f.DiasAlVto}</td>
+          <td class="num" data-sort-val="${+f.Importe||0}"><b>${fmtSgFull(+f.Importe)}</b></td>
+          <td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(f.Observacion||'').substring(0,80)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>`;
+  attachTableSort(document.getElementById('tblDetalle'));
+}
+</script>
+</body>
+</html>
