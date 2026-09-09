@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Flujo de Fondos · Ingresos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body data-page="ingresos">
+
+<main class="content">
+  <header class="page-header">
+    <div>
+      <h1>Ingresos proyectados</h1>
+      <div class="updated">Últ. actualización: <span id="lastUpdated">-</span> · Acreditaciones de tarjetas + cheques terceros por cobrar</div>
+    </div>
+    <div><button class="btn" onclick="location.reload()">Recargar</button></div>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Distribución por cobro</h2>
+      <div class="chart-wrap"><canvas id="chartTramos"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Por origen</h2>
+      <div class="scroll"><table id="tblOrigen"></table></div>
+    </div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Por empresa</h2>
+      <div class="scroll"><table id="tblEmpresas"></table></div>
+    </div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Detalle de ingresos proyectados</h2>
+      <div class="filters">
+        <input type="text" id="fOrigen" list="dlOrigen" placeholder="Origen (escribí o elegí)" autocomplete="off">
+        <datalist id="dlOrigen"></datalist>
+        <input type="text" id="fEmpresa" list="dlEmpresa" placeholder="Empresa (escribí o elegí)" autocomplete="off">
+        <datalist id="dlEmpresa"></datalist>
+        <select id="fTramo">
+          <option value="">Todos los cobros</option>
+          <option value="7">Próximos 7 días</option>
+          <option value="30">Próximos 30 días</option>
+          <option value="60">Próximos 60 días</option>
+          <option value="futuro">Más de 60 días</option>
+        </select>
+        <input type="text" id="fBusqueda" placeholder="Buscar concepto / detalle / empresa...">
+        <span id="fResumen" class="muted"></span>
+      </div>
+      <div class="scroll tall"><table id="tblMovs"></table></div>
+    </div>
+  </div>
+</main>
+
+<script src="assets/layout.js"></script>
+<script>
+let DATA = null;
+let chartT = null;
+
+fetchPageData(d => {
+  DATA = d;
+  renderSidebar({
+    proveedores: DATA.counters?.proveedores ?? '',
+    'cheques-propios': DATA.counters?.chequesPropios ?? '',
+    prestamos: DATA.counters?.prestamos ?? '',
+    planes: DATA.counters?.planes ?? '',
+    ingresos: DATA.counters?.ingresos ?? '',
+    cobranzas: DATA.counters?.cobranzas ?? ''
+  });
+  render();
+});
+
+function render() {
+  document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);
+  renderKpis();
+  renderChartTramos();
+  renderTablaOrigen();
+  renderTablaEmpresas();
+  initFiltros();
+  redrawMovs();
+}
+
+function renderKpis() {
+  const t = DATA.totales;
+  const kpis = [
+    {label:'Total por cobrar', value:t.TotalImporte, type:'pos',  sub:`${fmt(t.CantMovs)} movs`},
+    {label:'Próximos 7 días',  value:t.Importe7d,   type:'info', sub:'esta semana'},
+    {label:'Próximos 30 días', value:t.Importe30d,  type:'info', sub:`${fmt(t.Cant30d)} movs`},
+    {label:'Empresas',         value:null, type:'info', sub:`${fmt(t.CantEmpresas)} empresas`},
+  ];
+  document.getElementById('kpis').innerHTML = kpis.map(k => `
+    <div class="kpi ${k.type}">
+      <div class="label">${k.label}</div>
+      <div class="value">${k.value!=null ? fmtSg(k.value) : (k.sub.split(' ')[0])}</div>
+      <div class="sub">${k.value!=null ? k.sub : ''}</div>
+    </div>`).join('');
+}
+
+function renderChartTramos() {
+  const movs = DATA.movs || [];
+  const buckets = {
+    '0-7 días': 0, '8-15 días': 0, '16-30 días': 0,
+    '31-60 días': 0, '61-90 días': 0, '> 90 días': 0
+  };
+  movs.forEach(m => {
+    const d = m.DiasACobrar;
+    if (d == null || d < 0) return;
+    if      (d <= 7)   buckets['0-7 días']   += (+m.Importe||0);
+    else if (d <= 15)  buckets['8-15 días']  += (+m.Importe||0);
+    else if (d <= 30)  buckets['16-30 días'] += (+m.Importe||0);
+    else if (d <= 60)  buckets['31-60 días'] += (+m.Importe||0);
+    else if (d <= 90)  buckets['61-90 días'] += (+m.Importe||0);
+    else               buckets['> 90 días']  += (+m.Importe||0);
+  });
+  const labels = Object.keys(buckets);
+  const data = Object.values(buckets);
+  const colors = ['#0f5c3a','#197a4b','#197a4b','#a67c11','#a67c11','#8f2a2a'];
+  if (chartT) chartT.destroy();
+  chartT = new Chart(document.getElementById('chartTramos'), {
+    type:'bar',
+    data:{labels, datasets:[{data, backgroundColor:colors, borderRadius:6}]},
+    options:{responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtSg(c.parsed.y)}}},
+      scales:{y:{ticks:{callback:v=>fmt(v/1e6)+' M'}}, x:{ticks:{font:{size:10}}}}
+    }
+  });
+}
+
+function renderTablaOrigen() {
+  const rows = DATA.porOrigen || [];
+  const tot = rows.reduce((a,r)=>({C:a.C+(+r.CantMovs||0), T:a.T+(+r.TotalImporte||0)}),{C:0,T:0});
+  document.getElementById('tblOrigen').innerHTML = `
+    <thead><tr><th>Origen</th><th class="num">Movimientos</th><th class="num">Empresas</th><th class="num">Importe</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr onclick="filtrarPorOrigen('${r.Origen}')" style="cursor:pointer">
+        <td>${r.Origen}</td>
+        <td class="num">${r.CantMovs}</td>
+        <td class="num muted">${r.CantEmpresas}</td>
+        <td class="num"><b>${fmtSg(+r.TotalImporte)}</b></td>
+      </tr>`).join('')}
+      <tr class="total"><td>TOTAL</td><td class="num">${tot.C}</td><td class="num"></td><td class="num">${fmtSg(tot.T)}</td></tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblOrigen'));
+}
+
+function renderTablaEmpresas() {
+  const rows = DATA.porEmpresa || [];
+  const tot = rows.reduce((a,r)=>({C:a.C+(+r.CantMovs||0), T:a.T+(+r.TotalImporte||0), Tj:a.Tj+(+r.ImporteTarjetas||0), Ch:a.Ch+(+r.ImporteCheques||0)}),{C:0,T:0,Tj:0,Ch:0});
+  document.getElementById('tblEmpresas').innerHTML = `
+    <thead><tr><th>Empresa</th><th class="num">Movs</th><th class="num">Tarjetas</th><th class="num">Cheques terceros</th><th class="num">Total</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr onclick="filtrarPorEmpresa('${(r.NombreEmpresa||r.EmpresaId).replace(/'/g,'&#39;')}')" style="cursor:pointer">
+        <td>${r.NombreEmpresa||r.EmpresaId}</td>
+        <td class="num">${r.CantMovs}</td>
+        <td class="num muted">${fmtSg(+r.ImporteTarjetas)}</td>
+        <td class="num muted">${fmtSg(+r.ImporteCheques)}</td>
+        <td class="num"><b>${fmtSg(+r.TotalImporte)}</b></td>
+      </tr>`).join('')}
+      <tr class="total"><td>TOTAL</td><td class="num">${tot.C}</td><td class="num">${fmtSg(tot.Tj)}</td><td class="num">${fmtSg(tot.Ch)}</td><td class="num">${fmtSg(tot.T)}</td></tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblEmpresas'));
+}
+
+function initFiltros() {
+  const origenes = [...new Set(DATA.movs.map(m => m.Origen).filter(Boolean))].sort();
+  const empresas = [...new Set(DATA.movs.map(m => m.NombreEmpresa || m.EmpresaId).filter(Boolean))].sort();
+  document.getElementById('dlOrigen').innerHTML  = origenes.map(o=>`<option value="${o}">`).join('');
+  document.getElementById('dlEmpresa').innerHTML = empresas.map(e=>`<option value="${e}">`).join('');
+  ['fOrigen','fEmpresa','fTramo','fBusqueda'].forEach(id => {
+    document.getElementById(id).oninput = redrawMovs;
+  });
+}
+
+function filtrarPorOrigen(o)  { document.getElementById('fOrigen').value = o;  redrawMovs(); scrollToTabla(); }
+function filtrarPorEmpresa(n) { document.getElementById('fEmpresa').value = n; redrawMovs(); scrollToTabla(); }
+function scrollToTabla() { document.getElementById('tblMovs').scrollIntoView({behavior:'smooth', block:'start'}); }
+
+function redrawMovs() {
+  const fo = document.getElementById('fOrigen').value.trim();
+  const fm = document.getElementById('fEmpresa').value.trim();
+  const ft = document.getElementById('fTramo').value;
+  const fq = document.getElementById('fBusqueda').value.trim().toLowerCase();
+  const filtrados = DATA.movs.filter(m => {
+    if (fo && (m.Origen||'').toLowerCase().indexOf(fo.toLowerCase()) < 0) return false;
+    if (fm && ((m.NombreEmpresa||m.EmpresaId)||'').toLowerCase().indexOf(fm.toLowerCase()) < 0) return false;
+    if (ft === '7'      && !(m.DiasACobrar <= 7))  return false;
+    if (ft === '30'     && !(m.DiasACobrar <= 30)) return false;
+    if (ft === '60'     && !(m.DiasACobrar <= 60)) return false;
+    if (ft === 'futuro' && !(m.DiasACobrar > 60))  return false;
+    if (fq) {
+      const t = ((m.Concepto||'')+' '+(m.Detalle||'')+' '+(m.NombreEmpresa||'')+' '+(m.Origen||'')).toLowerCase();
+      if (t.indexOf(fq) < 0) return false;
+    }
+    return true;
+  });
+  const total = filtrados.reduce((s,m)=>s+(+m.Importe||0),0);
+  document.getElementById('fResumen').innerHTML = `<b>${filtrados.length}</b> ingresos · Total <b>${fmtSg(total)}</b>`;
+
+  document.getElementById('tblMovs').innerHTML = `
+    <thead><tr>
+      <th>Origen</th><th>Empresa</th><th>Detalle</th>
+      <th>Fecha cobro</th><th class="num">Días</th><th class="num">Importe</th>
+    </tr></thead>
+    <tbody>
+      ${filtrados.slice(0, 2000).map(m=>`<tr>
+        <td>${m.Origen||''}</td>
+        <td>${m.NombreEmpresa||m.EmpresaId||''}</td>
+        <td class="muted">${m.Detalle||m.Concepto||''}</td>
+        <td>${fmtDate(m.Fecha)}</td>
+        <td class="num ${m.DiasACobrar<=7?'pos':'muted'}" data-sort-val="${m.DiasACobrar}">${m.DiasACobrar}</td>
+        <td class="num pos" data-sort-val="${+m.Importe||0}"><b>${fmtSg(+m.Importe)}</b></td>
+      </tr>`).join('')}
+      ${filtrados.length > 2000 ? `<tr><td colspan="6" class="muted" style="text-align:center;padding:12px">(mostrando primeros 2000 de ${filtrados.length} — filtrá para acotar)</td></tr>` : ''}
+    </tbody>`;
+  attachTableSort(document.getElementById('tblMovs'));
+}
+</script>
+</body>
+</html>

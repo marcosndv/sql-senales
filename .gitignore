@@ -21,3 +21,10 @@ desktop.ini
 .idea/
 *.swp
 *~
+
+# Data regenerable del dashboard Flujo de Fondos (la task de refresh la produce cada 30 min)
+flujo-fondos-dashboard/data-*.json
+flujo-fondos-dashboard/data.json
+
+# Logs
+logs/

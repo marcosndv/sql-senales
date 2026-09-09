@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Flujo de Fondos · Planes ARCA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body data-page="planes">
+
+<main class="content">
+  <header class="page-header">
+    <div>
+      <h1>Planes de pago ARCA</h1>
+      <div class="updated">Últ. actualización: <span id="lastUpdated">-</span> · Solo cuotas vigentes con vencimiento &ge; hoy</div>
+    </div>
+    <div><button class="btn" onclick="location.reload()">Recargar</button></div>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Distribución por vencimiento</h2>
+      <div class="chart-wrap"><canvas id="chartTramos"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Por organismo</h2>
+      <div class="scroll"><table id="tblEntidad"></table></div>
+    </div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Por empresa</h2>
+      <div class="scroll"><table id="tblEmpresas"></table></div>
+    </div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Detalle de cuotas de planes</h2>
+      <div class="filters">
+        <input type="text" id="fEntidad" list="dlEntidad" placeholder="Organismo (escribí o elegí)" autocomplete="off">
+        <datalist id="dlEntidad"></datalist>
+        <input type="text" id="fEmpresa" list="dlEmpresa" placeholder="Empresa (escribí o elegí)" autocomplete="off">
+        <datalist id="dlEmpresa"></datalist>
+        <select id="fTramo">
+          <option value="">Todos los vencimientos</option>
+          <option value="7">Próximos 7 días</option>
+          <option value="30">Próximos 30 días</option>
+          <option value="60">Próximos 60 días</option>
+          <option value="futuro">Más de 60 días</option>
+        </select>
+        <input type="text" id="fBusqueda" placeholder="Buscar nro plan / empresa / estado...">
+        <span id="fResumen" class="muted"></span>
+      </div>
+      <div class="tabs" id="tabsVista" style="margin-bottom:12px">
+        <button data-view="cuotas" class="active">Lista de cuotas</button>
+        <button data-view="matriz">Matriz por plan</button>
+      </div>
+      <div id="viewCuotas">
+        <div class="scroll tall"><table id="tblCuotas"></table></div>
+      </div>
+      <div id="viewMatriz" class="hidden">
+        <div class="scroll tall matriz-wrap"><table id="tblMatriz" class="matriz"></table></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="assets/layout.js"></script>
+<script src="assets/page-cuotas.js"></script>
+<script>renderPageCuotas({});</script>
+</body>
+</html>

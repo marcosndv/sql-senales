@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Flujo de Fondos · Deuda global</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body data-page="deuda-global">
+
+<main class="content">
+  <header class="page-header">
+    <div>
+      <h1>Estado de deuda global</h1>
+      <div class="updated">Últ. actualización: <span id="lastUpdated">-</span></div>
+    </div>
+    <div><button class="btn" onclick="location.reload()">Recargar</button></div>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Deuda por origen</h2>
+      <div class="chart-wrap"><canvas id="chartOrigen"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Deuda por mes de vencimiento</h2>
+      <div class="chart-wrap"><canvas id="chartMes"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Consolidado por empresa</h2>
+      <div class="scroll tall"><table id="tblEmpresas"></table></div>
+    </div>
+  </div>
+</main>
+
+<script src="assets/layout.js"></script>
+<script>
+let DATA = null;
+let chartOrig = null, chartMes = null;
+
+const COLORS = {
+  'Proveedores':     '#a67c11',
+  'Cheques propios': '#8f2a2a',
+  'Préstamos':       '#2c5c78',
+  'Planes ARCA':     '#6b4a68',
+};
+
+fetchPageData(d => {
+  DATA = d;
+  renderSidebar({
+    proveedores: DATA.counters?.proveedores ?? '',
+    'cheques-propios': DATA.counters?.chequesPropios ?? '',
+    prestamos: DATA.counters?.prestamos ?? '',
+    planes: DATA.counters?.planes ?? '',
+    ingresos: DATA.counters?.ingresos ?? '',
+    cobranzas: DATA.counters?.cobranzas ?? ''
+  });
+  render();
+});
+
+function render() {
+  document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);
+  renderKpis();
+  renderChartOrigen();
+  renderChartMes();
+  renderTablaEmpresas();
+}
+
+function renderKpis() {
+  const t = DATA.totales;
+  const k = [
+    {label:'Deuda total',        value:t.TotalDeuda,   type:'neg',  sub:`${fmt(t.CantItems)} items · ${fmt(t.CantEmpresas)} empresas`},
+    {label:'Vencido',            value:t.TotalVencido, type:'neg',  sub:'saldo con vencimiento pasado'},
+    {label:'Próx. 30 días',      value:t.TotalProx30,  type:'warn', sub:'vencen en el próximo mes'},
+    {label:'Orígenes',           value:null, type:'info', sub:`${(DATA.porOrigen||[]).length} tipos de deuda`},
+  ];
+  document.getElementById('kpis').innerHTML = k.map(x => `
+    <div class="kpi ${x.type}">
+      <div class="label">${x.label}</div>
+      <div class="value">${x.value!=null ? fmtSg(x.value) : x.sub.split(' ')[0]}</div>
+      <div class="sub">${x.value!=null ? x.sub : ''}</div>
+    </div>`).join('');
+}
+
+function renderChartOrigen() {
+  const rows = DATA.porOrigen || [];
+  const labels = rows.map(r => r.Origen);
+  const totales = rows.map(r => +r.Total || 0);
+  const vencidos = rows.map(r => +r.Vencido || 0);
+  const colors = labels.map(l => COLORS[l] || '#666');
+  if (chartOrig) chartOrig.destroy();
+  chartOrig = new Chart(document.getElementById('chartOrigen'), {
+    type: 'bar',
+    data: {labels, datasets: [
+      {label:'Total',   data:totales,  backgroundColor:colors,             borderRadius:6},
+      {label:'Vencido', data:vencidos, backgroundColor:'rgba(143,42,42,.65)', borderRadius:6},
+    ]},
+    options: {
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtSg(c.parsed.x)}}},
+      scales:{x:{ticks:{callback:v=>fmt(v/1e6)+' M'}}}
+    }
+  });
+}
+
+function renderChartMes() {
+  const rows = DATA.porMes || [];
+  const meses = [...new Set(rows.map(r => r.Periodo))];
+  // Poner "Vencido" primero
+  meses.sort((a,b) => a === 'Vencido' ? -1 : b === 'Vencido' ? 1 : a.localeCompare(b));
+  const origenes = [...new Set(rows.map(r => r.Origen))].sort();
+  const datasets = origenes.map(o => ({
+    label: o,
+    data: meses.map(m => {
+      const r = rows.find(x => x.Periodo === m && x.Origen === o);
+      return r ? +r.Total || 0 : 0;
+    }),
+    backgroundColor: COLORS[o] || '#666',
+    stack: 's',
+    borderRadius: 4,
+  }));
+  if (chartMes) chartMes.destroy();
+  chartMes = new Chart(document.getElementById('chartMes'), {
+    type:'bar',
+    data:{labels: meses, datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtSg(c.parsed.y)}}},
+      scales:{y:{stacked:true, ticks:{callback:v=>fmt(v/1e6)+' M'}}, x:{stacked:true}}
+    }
+  });
+}
+
+function renderTablaEmpresas() {
+  const rows = DATA.porEmpresa || [];
+  const tot = rows.reduce((a,r) => ({
+    T:a.T + (+r.TotalDeuda||0),
+    P:a.P + (+r.Proveedores||0),
+    C:a.C + (+r.ChequesPropios||0),
+    B:a.B + (+r.Prestamos||0),
+    A:a.A + (+r.PlanesArca||0),
+    V:a.V + (+r.Vencido||0),
+    X:a.X + (+r.Prox30||0),
+    N:a.N + (+r.CantItems||0),
+  }), {T:0,P:0,C:0,B:0,A:0,V:0,X:0,N:0});
+  document.getElementById('tblEmpresas').innerHTML = `
+    <thead><tr>
+      <th>Empresa</th>
+      <th class="num">Total</th>
+      <th class="num">Proveedores</th>
+      <th class="num">Cheques propios</th>
+      <th class="num">Préstamos</th>
+      <th class="num">Planes ARCA</th>
+      <th class="num">Vencido</th>
+      <th class="num">Próx 30d</th>
+      <th class="num">Items</th>
+    </tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${r.NombreEmpresa || r.EmpresaId}</td>
+        <td class="num" data-sort-val="${+r.TotalDeuda||0}"><b>${fmtSg(+r.TotalDeuda)}</b></td>
+        <td class="num muted" data-sort-val="${+r.Proveedores||0}">${(+r.Proveedores)>0?fmtSg(+r.Proveedores):'—'}</td>
+        <td class="num muted" data-sort-val="${+r.ChequesPropios||0}">${(+r.ChequesPropios)>0?fmtSg(+r.ChequesPropios):'—'}</td>
+        <td class="num muted" data-sort-val="${+r.Prestamos||0}">${(+r.Prestamos)>0?fmtSg(+r.Prestamos):'—'}</td>
+        <td class="num muted" data-sort-val="${+r.PlanesArca||0}">${(+r.PlanesArca)>0?fmtSg(+r.PlanesArca):'—'}</td>
+        <td class="num ${(+r.Vencido)>0?'neg':'muted'}" data-sort-val="${+r.Vencido||0}">${(+r.Vencido)>0?fmtSg(+r.Vencido):'—'}</td>
+        <td class="num ${(+r.Prox30)>0?'warn':'muted'}" data-sort-val="${+r.Prox30||0}">${(+r.Prox30)>0?fmtSg(+r.Prox30):'—'}</td>
+        <td class="num">${r.CantItems}</td>
+      </tr>`).join('')}
+      <tr class="total">
+        <td>TOTAL</td>
+        <td class="num">${fmtSg(tot.T)}</td>
+        <td class="num">${fmtSg(tot.P)}</td>
+        <td class="num">${fmtSg(tot.C)}</td>
+        <td class="num">${fmtSg(tot.B)}</td>
+        <td class="num">${fmtSg(tot.A)}</td>
+        <td class="num neg">${fmtSg(tot.V)}</td>
+        <td class="num warn">${fmtSg(tot.X)}</td>
+        <td class="num">${tot.N}</td>
+      </tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblEmpresas'));
+}
+</script>
+</body>
+</html>

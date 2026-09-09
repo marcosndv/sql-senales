@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Flujo de Fondos · Ingresos vs egresos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body data-page="consolidado">
+
+<main class="content">
+  <header class="page-header">
+    <div>
+      <h1>Ingresos vs egresos</h1>
+      <div class="updated">Últ. actualización: <span id="lastUpdated">-</span></div>
+    </div>
+    <div><button class="btn" onclick="location.reload()">Recargar</button></div>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Mensual — histórico + proyectado</h2>
+      <div class="chart-wrap tall"><canvas id="chartMensual"></canvas></div>
+      <div class="muted" style="font-size:11px;margin-top:8px">Los meses futuros son proyecciones a partir de <b>vw_FlujoFondos_Proyectado</b> (facturas, cheques, préstamos, planes y cobranzas por vencer). Los vencidos del proyectado se acumulan en el mes actual.</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Acumulado año en curso</h2>
+      <div class="chart-wrap"><canvas id="chartAcum"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Año en curso por empresa</h2>
+      <div class="scroll tall"><table id="tblEmpresas"></table></div>
+    </div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Detalle mensual</h2>
+      <div class="scroll"><table id="tblMensual"></table></div>
+    </div>
+  </div>
+</main>
+
+<script src="assets/layout.js"></script>
+<script>
+let DATA = null;
+let chartMens = null, chartAcum = null;
+
+fetchPageData(d => {
+  DATA = d;
+  renderSidebar({
+    proveedores: DATA.counters?.proveedores ?? '',
+    'cheques-propios': DATA.counters?.chequesPropios ?? '',
+    prestamos: DATA.counters?.prestamos ?? '',
+    planes: DATA.counters?.planes ?? '',
+    ingresos: DATA.counters?.ingresos ?? '',
+    cobranzas: DATA.counters?.cobranzas ?? ''
+  });
+  render();
+});
+
+function render() {
+  document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);
+  renderKpis();
+  renderChartMensual();
+  renderChartAcum();
+  renderTablaEmpresas();
+  renderTablaMensual();
+}
+
+function renderKpis() {
+  const t = DATA.totalesAno;
+  const netoMes = (+t.IngresosMes||0) - (+t.EgresosMes||0);
+  const netoAno = (+t.IngresosAno||0) - (+t.EgresosAno||0);
+  const k = [
+    {label:'Ingresos mes actual', value:t.IngresosMes, type:'pos', sub:'cobros del mes en curso'},
+    {label:'Egresos mes actual',  value:t.EgresosMes,  type:'neg', sub:'pagos del mes en curso'},
+    {label:'Neto mes',            value:netoMes,       type:netoMes>=0?'pos':'neg', sub:netoMes>=0?'Superávit':'Déficit'},
+    {label:'Ingresos año',        value:t.IngresosAno, type:'pos', sub:`año ${new Date().getFullYear()}`},
+    {label:'Egresos año',         value:t.EgresosAno,  type:'neg', sub:`año ${new Date().getFullYear()}`},
+    {label:'Neto año',            value:netoAno,       type:netoAno>=0?'pos':'neg', sub:netoAno>=0?'Superávit acum.':'Déficit acum.'},
+  ];
+  document.getElementById('kpis').innerHTML = k.map(x => `
+    <div class="kpi ${x.type}">
+      <div class="label">${x.label}</div>
+      <div class="value">${fmtSg(x.value)}</div>
+      <div class="sub">${x.sub}</div>
+    </div>`).join('');
+}
+
+function renderChartMensual() {
+  const rows = DATA.mensual || [];
+  const labels = rows.map(r => r.Periodo);
+  const ingresos = rows.map(r => +r.Ingresos || 0);
+  const egresosNeg = rows.map(r => -(+r.Egresos || 0));
+  const neto = rows.map(r => +r.Neto || 0);
+  const bgInc = rows.map(r => +r.EsProyectado ? 'rgba(25,122,75,.45)'  : '#0f5c3a');
+  const bgEgr = rows.map(r => +r.EsProyectado ? 'rgba(143,42,42,.45)'  : '#8f2a2a');
+  if (chartMens) chartMens.destroy();
+  chartMens = new Chart(document.getElementById('chartMensual'), {
+    data:{labels, datasets:[
+      {type:'bar', label:'Ingresos', data:ingresos,  backgroundColor:bgInc, borderRadius:4, stack:'s'},
+      {type:'bar', label:'Egresos',  data:egresosNeg, backgroundColor:bgEgr, borderRadius:4, stack:'s'},
+      {type:'line', label:'Neto', data:neto, borderColor:'#2b2a26', backgroundColor:'#2b2a26', tension:.25, pointRadius:3, borderWidth:2},
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{position:'bottom'},
+        tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtSg(Math.abs(c.parsed.y))}}
+      },
+      scales:{y:{ticks:{callback:v=>fmt(v/1e6)+' M'}}}
+    }
+  });
+}
+
+function renderChartAcum() {
+  const rows = (DATA.mensual || []).filter(r => !r.EsProyectado);
+  const ano = new Date().getFullYear();
+  const rowsAno = rows.filter(r => r.Periodo.startsWith(String(ano)));
+  const labels = rowsAno.map(r => r.Periodo);
+  let accI = 0, accE = 0;
+  const acI = rowsAno.map(r => (accI += +r.Ingresos||0));
+  const acE = rowsAno.map(r => (accE += +r.Egresos||0));
+  if (chartAcum) chartAcum.destroy();
+  chartAcum = new Chart(document.getElementById('chartAcum'), {
+    type:'line',
+    data:{labels, datasets:[
+      {label:'Ingresos acum.', data:acI, borderColor:'#0f5c3a', backgroundColor:'rgba(15,92,58,.15)', fill:true, tension:.25, borderWidth:2, pointRadius:3},
+      {label:'Egresos acum.',  data:acE, borderColor:'#8f2a2a', backgroundColor:'rgba(143,42,42,.15)', fill:true, tension:.25, borderWidth:2, pointRadius:3},
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtSg(c.parsed.y)}}},
+      scales:{y:{ticks:{callback:v=>fmt(v/1e6)+' M'}}}
+    }
+  });
+}
+
+function renderTablaEmpresas() {
+  const rows = DATA.porEmpresa || [];
+  const tot = rows.reduce((a,r)=>({I:a.I+(+r.Ingresos||0), E:a.E+(+r.Egresos||0), N:a.N+(+r.Neto||0)}),{I:0,E:0,N:0});
+  document.getElementById('tblEmpresas').innerHTML = `
+    <thead><tr><th>Empresa</th><th class="num">Ingresos</th><th class="num">Egresos</th><th class="num">Neto</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${r.NombreEmpresa || r.EmpresaId}</td>
+        <td class="num pos" data-sort-val="${+r.Ingresos||0}">${fmtSg(+r.Ingresos)}</td>
+        <td class="num neg" data-sort-val="${+r.Egresos||0}">${fmtSg(+r.Egresos)}</td>
+        <td class="num ${(+r.Neto)>=0?'pos':'neg'}" data-sort-val="${+r.Neto||0}"><b>${fmtSg(+r.Neto)}</b></td>
+      </tr>`).join('')}
+      <tr class="total"><td>TOTAL</td><td class="num pos">${fmtSg(tot.I)}</td><td class="num neg">${fmtSg(tot.E)}</td><td class="num ${tot.N>=0?'pos':'neg'}">${fmtSg(tot.N)}</td></tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblEmpresas'));
+}
+
+function renderTablaMensual() {
+  const rows = DATA.mensual || [];
+  let acumNeto = 0;
+  document.getElementById('tblMensual').innerHTML = `
+    <thead><tr><th>Período</th><th class="num">Ingresos</th><th class="num">Egresos</th><th class="num">Neto</th><th class="num">Acum. neto</th><th>Tipo</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>{
+        acumNeto += (+r.Neto||0);
+        const proy = +r.EsProyectado === 1;
+        return `<tr${proy?' style="opacity:.7"':''}>
+        <td><b>${r.Periodo}</b></td>
+        <td class="num pos">${fmtSg(+r.Ingresos)}</td>
+        <td class="num neg">${fmtSg(+r.Egresos)}</td>
+        <td class="num ${(+r.Neto)>=0?'pos':'neg'}"><b>${fmtSg(+r.Neto)}</b></td>
+        <td class="num ${acumNeto>=0?'pos':'neg'}">${fmtSg(acumNeto)}</td>
+        <td>${proy?'<span class="badge warn">Proyectado</span>':'<span class="badge info">Histórico</span>'}</td>
+      </tr>`;}).join('')}
+    </tbody>`;
+  attachTableSort(document.getElementById('tblMensual'));
+}
+</script>
+</body>
+</html>

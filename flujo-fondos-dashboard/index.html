@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Flujo de Fondos · Inicio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body data-page="inicio">
+
+<main class="content">
+  <header class="page-header">
+    <div>
+      <h1>Flujo de Fondos — Resumen</h1>
+      <div class="updated">Últ. actualización: <span id="lastUpdated">-</span> · Saldo: <span id="fechaSaldo">-</span></div>
+    </div>
+    <div><button class="btn" onclick="location.reload()">Recargar</button></div>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="card" id="alertasCard" style="margin-bottom:16px;display:none">
+    <h2>Alertas</h2>
+    <div id="alertas"></div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h2 style="margin:0">Proyección semanal — entradas vs salidas</h2>
+        <div class="tabs" id="tabsHorizonte">
+          <button data-h="4"  onclick="setHorizonte(4)">4 sem</button>
+          <button data-h="8"  onclick="setHorizonte(8)" class="active">8 sem</button>
+          <button data-h="12" onclick="setHorizonte(12)">12 sem</button>
+        </div>
+      </div>
+      <div class="chart-wrap tall"><canvas id="chartSemanas"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Posición por empresa</h2>
+      <div class="scroll"><table id="tblEmpresas"></table></div>
+    </div>
+    <div class="card">
+      <h2>Posición por banco</h2>
+      <div class="scroll"><table id="tblBancos"></table></div>
+    </div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Todas las cuentas (hoy)</h2>
+      <div class="scroll tall"><table id="tblCuentas"></table></div>
+    </div>
+  </div>
+
+  <div class="card" id="sinEmpresaCard" style="display:none;margin-top:16px">
+    <h2>⚠ Cuentas sin mapear a empresa</h2>
+    <p class="muted" style="margin-top:0">Editá <code>dbo.Config_MapeoRazonSocial</code> para asignarlas a una <code>EMPR*</code>.</p>
+    <table id="tblSinEmpresa"></table>
+  </div>
+</main>
+
+<script src="assets/layout.js"></script>
+<script>
+let DATA = null;
+let HORIZONTE_SEMANAS = 8;
+let chartSem = null;
+
+fetchPageData(d => {
+  DATA = d;
+  renderSidebar({
+    proveedores: DATA.counters?.proveedores ?? '',
+    'cheques-propios': DATA.counters?.chequesPropios ?? '',
+    prestamos: DATA.counters?.prestamos ?? '',
+    planes: DATA.counters?.planes ?? '',
+    ingresos: DATA.counters?.ingresos ?? '',
+    cobranzas: DATA.counters?.cobranzas ?? ''
+  });
+  render();
+});
+
+function render() {
+  document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);
+  document.getElementById('fechaSaldo').textContent = fmtDate(DATA.posicionTotales.FechaSaldo);
+  renderKpis();
+  renderAlertas();
+  renderChartSemanas();
+  renderTablaEmpresas();
+  renderTablaBancos();
+  renderTablaCuentas();
+  renderSinEmpresa();
+}
+
+function renderKpis() {
+  const t = DATA.posicionTotales;
+  const p30 = DATA.proyeccion30d;
+  const fciCant = (DATA.posicionCuentas||[]).filter(c => (+c.FCI||0) !== 0).length;
+  const kpis = [
+    {label:'Disponible total (hoy)', value:t.Disponible, type:t.Disponible>=0?'pos':'neg', sub:`${t.CantCuentas} ctas / ${t.CantEmpresas} empresas`},
+    {label:'Saldo bancos (hoy)',    value:t.Saldo,      type:t.Saldo>=0?'pos':'neg',      sub:`Neg: ${fmtSg(t.SaldoNegativo)} · Pos: ${fmtSg(t.SaldoPositivo)}`},
+    {label:'Fondos de inversión',   value:t.FCI||0,     type:(t.FCI||0)>0?'pos':'info',    sub:fciCant>0?`${fciCant} ctas con FCI`:'sin colocaciones'},
+    {label:'Línea autorizada',      value:t.DescubiertoAutorizado, type:'info', sub:'Descubierto total disponible'},
+    {label:'Entradas próx 30 días', value:p30.entradas, type:'pos', sub:`${p30.movEnt} movs`},
+    {label:'Salidas próx 30 días',  value:p30.salidas,  type:'neg', sub:`${p30.movSal} movs`},
+    {label:'Flujo neto 30 días',    value:p30.neto,     type:p30.neto>=0?'pos':'neg', sub:p30.neto>=0?'Superávit proyectado':'Déficit proyectado'},
+  ];
+  document.getElementById('kpis').innerHTML = kpis.map(k => `
+    <div class="kpi ${k.type}">
+      <div class="label">${k.label}</div>
+      <div class="value ${k.type==='pos'?'pos':k.type==='neg'?'neg':''}">${fmtSg(k.value)}</div>
+      <div class="sub">${k.sub}</div>
+    </div>`).join('');
+}
+
+function renderAlertas() {
+  const alertas = [];
+  const cuentasDesc = DATA.posicionCuentas.filter(c => (+c.Saldo||0) < 0);
+  if (cuentasDesc.length > 0) {
+    const total = cuentasDesc.reduce((s,c)=>s+(+c.Saldo||0),0);
+    alertas.push({t:'warn', txt:`<b>${cuentasDesc.length} cuentas</b> en descubierto por <b>${fmtSg(total)}</b>`});
+  }
+  const sinEmp = DATA.sinEmpresa || [];
+  if (sinEmp.length > 0) {
+    const total = sinEmp.reduce((s,c)=>s+(+c.Disponible||0),0);
+    alertas.push({t:'warn', txt:`<b>${sinEmp.length} cuentas</b> sin mapear a empresa (<b>${fmtSg(total)}</b>).`});
+  }
+  const el = document.getElementById('alertas');
+  if (alertas.length === 0) { document.getElementById('alertasCard').style.display='none'; return; }
+  document.getElementById('alertasCard').style.display = '';
+  el.innerHTML = alertas.map(a => `<div class="alert ${a.t}"><span>${a.txt}</span></div>`).join('');
+}
+
+function setHorizonte(n) {
+  HORIZONTE_SEMANAS = n;
+  document.querySelectorAll('#tabsHorizonte button').forEach(b => b.classList.toggle('active', +b.dataset.h === n));
+  renderChartSemanas();
+}
+
+function renderChartSemanas() {
+  const hoy = new Date();
+  const inicio = new Date(hoy); inicio.setHours(0,0,0,0);
+  const dow = inicio.getDay() || 7;
+  inicio.setDate(inicio.getDate() - (dow-1));
+  const semanas = [];
+  for (let i = 0; i < HORIZONTE_SEMANAS; i++) {
+    const s = new Date(inicio); s.setDate(inicio.getDate()+i*7);
+    const e = new Date(s); e.setDate(s.getDate()+6);
+    semanas.push({ini:s, fin:e, label:`${s.getDate()}/${s.getMonth()+1}`});
+  }
+  const b = semanas.map(_ => ({Tarjetas:0,'Cheques terceros':0,'Facturas a cobrar':0,'Cheques propios':0,'Facturas proveedores':0,'Préstamos':0,'Planes ARCA':0}));
+  (DATA.proyeccionPorDia || []).forEach(p => {
+    if (p.EsVencido) return;
+    const f = new Date(p.Fecha);
+    for (let i=0;i<semanas.length;i++) if (f >= semanas[i].ini && f <= semanas[i].fin) { if (b[i][p.Origen]!=null) b[i][p.Origen]+=(+p.Importe||0); break; }
+  });
+  const labels = semanas.map(w => w.label);
+  const dsTj = b.map(x => x['Tarjetas']);
+  const dsTe = b.map(x => x['Cheques terceros']);
+  const dsCo = b.map(x => x['Facturas a cobrar']);
+  const dsPr = b.map(x => -x['Cheques propios']);
+  const dsFa = b.map(x => -x['Facturas proveedores']);
+  const dsPB = b.map(x => -x['Préstamos']);
+  const dsPA = b.map(x => -x['Planes ARCA']);
+  const neto = labels.map((_,i) => dsTj[i]+dsTe[i]+dsCo[i]+dsPr[i]+dsFa[i]+dsPB[i]+dsPA[i]);
+  const dispHoy = +DATA.posicionTotales.Disponible || 0;
+  const acum = []; let run = dispHoy;
+  neto.forEach(n => { run += n; acum.push(run); });
+
+  if (chartSem) chartSem.destroy();
+  chartSem = new Chart(document.getElementById('chartSemanas'), {
+    data: { labels, datasets: [
+      {type:'bar', label:'Tarjetas',            data:dsTj, backgroundColor:'#197a4b', stack:'e'},
+      {type:'bar', label:'Cheques terceros',    data:dsTe, backgroundColor:'#0f5c3a', stack:'e'},
+      {type:'bar', label:'Facturas a cobrar',   data:dsCo, backgroundColor:'#3ea86b', stack:'e'},
+      {type:'bar', label:'Cheques propios',     data:dsPr, backgroundColor:'#8f2a2a', stack:'s'},
+      {type:'bar', label:'Facturas proveedores',data:dsFa, backgroundColor:'#a67c11', stack:'s'},
+      {type:'bar', label:'Préstamos',           data:dsPB, backgroundColor:'#2c5c78', stack:'s'},
+      {type:'bar', label:'Planes ARCA',         data:dsPA, backgroundColor:'#6b4a68', stack:'s'},
+      {type:'line', label:'Posición acumulada', data:acum, borderColor:'#2b2a26', backgroundColor:'#2b2a26', tension:.3, yAxisID:'y1', pointRadius:3, borderWidth:2}
+    ]},
+    options: {
+      responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+      scales: { y:{stacked:true, ticks:{callback:v=>fmt(v/1e6)+' M'}}, y1:{position:'right', grid:{drawOnChartArea:false}, ticks:{callback:v=>fmt(v/1e6)+' M'}} },
+      plugins: { legend:{position:'bottom', labels:{boxWidth:14, boxHeight:14, padding:12, font:{size:11}}},
+                 tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+fmtSg(ctx.parsed.y)}} }
+    }
+  });
+}
+
+function renderTablaEmpresas() {
+  const rows = DATA.posicionPorEmpresa;
+  const tot = rows.reduce((a,r)=>({Saldo:a.Saldo+(+r.Saldo||0),Disp:a.Disp+(+r.Disponible||0),Desc:a.Desc+(+r.DescubiertoAutorizado||0)}),{Saldo:0,Disp:0,Desc:0});
+  document.getElementById('tblEmpresas').innerHTML = `
+    <thead><tr><th>Empresa</th><th class="num">Ctas</th><th class="num">Saldo</th><th class="num">Descubierto</th><th class="num">Disponible</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${r.NombreEmpresa||r.Empresa}</td>
+        <td class="num">${r.CantCuentas}</td>
+        <td class="num ${cls(+r.Saldo)}">${fmtSg(+r.Saldo)}</td>
+        <td class="num muted">${fmtSg(+r.DescubiertoAutorizado)}</td>
+        <td class="num ${cls(+r.Disponible)}"><b>${fmtSg(+r.Disponible)}</b></td>
+      </tr>`).join('')}
+      <tr class="total"><td>TOTAL</td><td class="num">${rows.length}</td>
+        <td class="num ${cls(tot.Saldo)}">${fmtSg(tot.Saldo)}</td>
+        <td class="num">${fmtSg(tot.Desc)}</td>
+        <td class="num ${cls(tot.Disp)}">${fmtSg(tot.Disp)}</td></tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblEmpresas'));
+}
+
+function renderTablaBancos() {
+  const rows = DATA.posicionPorBanco;
+  const tot = rows.reduce((a,r)=>({Saldo:a.Saldo+(+r.Saldo||0),Disp:a.Disp+(+r.Disponible||0)}),{Saldo:0,Disp:0});
+  document.getElementById('tblBancos').innerHTML = `
+    <thead><tr><th>Banco</th><th class="num">Ctas</th><th class="num">Saldo</th><th class="num">Disponible</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${r.Banco}</td>
+        <td class="num">${r.CantCuentas}</td>
+        <td class="num ${cls(+r.Saldo)}">${fmtSg(+r.Saldo)}</td>
+        <td class="num ${cls(+r.Disponible)}"><b>${fmtSg(+r.Disponible)}</b></td>
+      </tr>`).join('')}
+      <tr class="total"><td>TOTAL</td><td class="num">${rows.length}</td><td class="num ${cls(tot.Saldo)}">${fmtSg(tot.Saldo)}</td><td class="num ${cls(tot.Disp)}">${fmtSg(tot.Disp)}</td></tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblBancos'));
+}
+
+function renderTablaCuentas() {
+  const rows = DATA.posicionCuentas;
+  const anyFci = rows.some(r => (+r.FCI||0) !== 0);
+  const totFci = rows.reduce((s,r)=>s+(+r.FCI||0),0);
+  const totSaldo = rows.reduce((s,r)=>s+(+r.Saldo||0),0);
+  const totDisp = rows.reduce((s,r)=>s+(+r.Disponible||0),0);
+  document.getElementById('tblCuentas').innerHTML = `
+    <thead><tr><th>Empresa</th><th>Banco</th><th>Cuenta</th><th class="num">Saldo</th>${anyFci?'<th class="num">FCI</th>':''}<th class="num">Disponible</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${r.NombreEmpresa||r.Empresa}</td>
+        <td>${r.Banco}</td>
+        <td class="muted">${r.Cuenta||''}</td>
+        <td class="num ${cls(+r.Saldo)}" data-sort-val="${+r.Saldo||0}">${fmtSg(+r.Saldo)}</td>
+        ${anyFci?`<td class="num ${(+r.FCI||0)>0?'pos':'muted'}" data-sort-val="${+r.FCI||0}">${(+r.FCI||0)!==0?fmtSg(+r.FCI):'—'}</td>`:''}
+        <td class="num ${cls(+r.Disponible)}" data-sort-val="${+r.Disponible||0}">${fmtSg(+r.Disponible)}</td>
+      </tr>`).join('')}
+      <tr class="total"><td colspan="3">TOTAL</td><td class="num ${cls(totSaldo)}">${fmtSg(totSaldo)}</td>${anyFci?`<td class="num pos">${fmtSg(totFci)}</td>`:''}<td class="num ${cls(totDisp)}">${fmtSg(totDisp)}</td></tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblCuentas'));
+}
+
+function renderSinEmpresa() {
+  const rows = DATA.sinEmpresa || [];
+  if (rows.length === 0) return;
+  document.getElementById('sinEmpresaCard').style.display = '';
+  document.getElementById('tblSinEmpresa').innerHTML = `
+    <thead><tr><th>Razón Social (Excel)</th><th>Banco</th><th>Cuenta</th><th class="num">Saldo</th><th class="num">Disponible</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr>
+        <td>${r.RazonSocialExcel}</td><td>${r.Banco}</td><td class="muted">${r.Cuenta||''}</td>
+        <td class="num ${cls(+r.Saldo)}">${fmtSg(+r.Saldo)}</td>
+        <td class="num ${cls(+r.Disponible)}">${fmtSg(+r.Disponible)}</td>
+      </tr>`).join('')}
+    </tbody>`;
+}
+</script>
+</body>
+</html>

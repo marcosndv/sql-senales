@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Flujo de Fondos · Cheques por pagar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body data-page="cheques-propios">
+
+<main class="content">
+  <header class="page-header">
+    <div>
+      <h1>Cheques propios — Por pagar</h1>
+      <div class="updated">Últ. actualización: <span id="lastUpdated">-</span> · Solo cheques con vencimiento &ge; hoy</div>
+    </div>
+    <div><button class="btn" onclick="location.reload()">Recargar</button></div>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Distribución por vencimiento</h2>
+      <div class="chart-wrap"><canvas id="chartTramos"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Top beneficiarios</h2>
+      <div class="scroll"><table id="tblBenef"></table></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Por empresa</h2>
+      <div class="scroll"><table id="tblEmpresas"></table></div>
+    </div>
+    <div class="card">
+      <h2>Por libro / cuenta bancaria</h2>
+      <div class="scroll"><table id="tblBancos"></table></div>
+    </div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Detalle de cheques</h2>
+      <div class="filters">
+        <select id="fEmpresa"><option value="">Todas las empresas</option></select>
+        <select id="fLibro"><option value="">Todos los libros</option></select>
+        <select id="fTramo">
+          <option value="">Todos los vencimientos</option>
+          <option value="7">Próximos 7 días</option>
+          <option value="30">Próximos 30 días</option>
+          <option value="60">Próximos 60 días</option>
+          <option value="futuro">Más de 60 días</option>
+        </select>
+        <input type="text" id="fBusqueda" placeholder="Buscar beneficiario / nro cheque...">
+        <span id="fResumen" class="muted"></span>
+      </div>
+      <div class="scroll tall"><table id="tblCheques"></table></div>
+    </div>
+  </div>
+</main>
+
+<script src="assets/layout.js"></script>
+<script>
+let DATA = null;
+let chartT = null;
+
+fetchPageData(d => {
+  DATA = d;
+  renderSidebar({
+    proveedores: DATA.counters?.proveedores ?? '',
+    'cheques-propios': DATA.counters?.chequesPropios ?? '',
+    prestamos: DATA.counters?.prestamos ?? '',
+    planes: DATA.counters?.planes ?? '',
+    ingresos: DATA.counters?.ingresos ?? '',
+    cobranzas: DATA.counters?.cobranzas ?? ''
+  });
+  render();
+});
+
+function render() {
+  document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);
+  renderKpis();
+  renderChartTramos();
+  renderTop();
+  renderTablaEmpresas();
+  renderTablaBancos();
+  initFiltros();
+  redrawCheques();
+}
+
+function renderKpis() {
+  const t = DATA.totales;
+  const kpis = [
+    {label:'Total por pagar', value:t.TotalImporte,   type:'warn', sub:`${fmt(t.CantCheques)} cheques`},
+    {label:'Próximos 30 días',value:t.Importe30d,     type:'info', sub:`${fmt(t.Cant30d)} cheques`},
+    {label:'Empresas',        value:null, type:'info', sub:`${fmt(t.CantEmpresas)} empresas`},
+  ];
+  document.getElementById('kpis').innerHTML = kpis.map(k => `
+    <div class="kpi ${k.type}">
+      <div class="label">${k.label}</div>
+      <div class="value">${k.value!=null ? fmtSg(k.value) : k.sub.split(' ')[0]}</div>
+      <div class="sub">${k.value!=null ? k.sub : ''}</div>
+    </div>`).join('');
+}
+
+function renderChartTramos() {
+  // Distribución de importes por semanas próximas
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const cheq = DATA.cheques || [];
+  const buckets = {
+    '0-7 días': 0,
+    '8-15 días': 0,
+    '16-30 días': 0,
+    '31-60 días': 0,
+    '61-90 días': 0,
+    '> 90 días': 0
+  };
+  cheq.forEach(c => {
+    const d = c.DiasAlPago;
+    if (d == null || d < 0) return;
+    if      (d <= 7)   buckets['0-7 días']     += (+c.Importe||0);
+    else if (d <= 15)  buckets['8-15 días']    += (+c.Importe||0);
+    else if (d <= 30)  buckets['16-30 días']   += (+c.Importe||0);
+    else if (d <= 60)  buckets['31-60 días']   += (+c.Importe||0);
+    else if (d <= 90)  buckets['61-90 días']   += (+c.Importe||0);
+    else               buckets['> 90 días']    += (+c.Importe||0);
+  });
+  const labels = Object.keys(buckets);
+  const data = Object.values(buckets);
+  const colors = ['#8f2a2a','#a67c11','#a67c11','#197a4b','#0f5c3a','#0f5c3a'];
+  if (chartT) chartT.destroy();
+  chartT = new Chart(document.getElementById('chartTramos'), {
+    type:'bar',
+    data:{labels, datasets:[{data, backgroundColor:colors, borderRadius:6}]},
+    options:{responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtSg(c.parsed.y)}}},
+      scales:{y:{ticks:{callback:v=>fmt(v/1e6)+' M'}}, x:{ticks:{font:{size:10}}}}
+    }
+  });
+}
+
+function renderTop() {
+  const rows = DATA.topBenefic || [];
+  const tbl = document.getElementById('tblBenef');
+  tbl.innerHTML = `
+    <thead><tr><th>Beneficiario</th><th class="num">Cheques</th><th class="num">Importe</th></tr></thead>
+    <tbody>
+      ${rows.map((r,i)=>`<tr data-benef="${(r.Beneficiario||'').replace(/"/g,'&quot;')}" style="cursor:pointer">
+        <td>${r.Beneficiario||''}</td>
+        <td class="num">${r.CantCheques}</td>
+        <td class="num">${fmtSg(+r.TotalImporte)}</td>
+      </tr>`).join('')}
+    </tbody>`;
+  tbl.querySelectorAll('tbody tr').forEach(tr => {
+    tr.onclick = () => filtrarPorBenef(tr.dataset.benef);
+  });
+  attachTableSort(tbl);
+}
+
+function renderTablaEmpresas() {
+  const rows = DATA.porEmpresa || [];
+  const tot = rows.reduce((a,r)=>({T:a.T+(+r.TotalImporte||0), C:a.C+(+r.CantCheques||0)}),{T:0,C:0});
+  document.getElementById('tblEmpresas').innerHTML = `
+    <thead><tr><th>Empresa</th><th class="num">Cheques</th><th class="num">Importe</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr onclick="filtrarPorEmpresa('${r.NombreEmpresa||r.EmpresaId}')" style="cursor:pointer">
+        <td>${r.NombreEmpresa||r.EmpresaId}</td>
+        <td class="num">${r.CantCheques}</td>
+        <td class="num">${fmtSg(+r.TotalImporte)}</td>
+      </tr>`).join('')}
+      <tr class="total"><td>TOTAL</td><td class="num">${tot.C}</td><td class="num">${fmtSg(tot.T)}</td></tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblEmpresas'));
+}
+
+function renderTablaBancos() {
+  const rows = DATA.porBanco || [];
+  document.getElementById('tblBancos').innerHTML = `
+    <thead><tr><th>Libro</th><th>Cuenta</th><th class="num">Cheques</th><th class="num">Importe</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr onclick="filtrarPorLibro('${r.LibroFondo}')" style="cursor:pointer">
+        <td>${r.LibroFondo}</td>
+        <td class="muted">${r.CuentaBancaria||''}</td>
+        <td class="num">${r.CantCheques}</td>
+        <td class="num">${fmtSg(+r.TotalImporte)}</td>
+      </tr>`).join('')}
+    </tbody>`;
+  attachTableSort(document.getElementById('tblBancos'));
+}
+
+function initFiltros() {
+  const empresas = [...new Set(DATA.cheques.map(c => c.NombreEmpresa || c.EmpresaId))].sort();
+  const libros = [...new Set(DATA.cheques.map(c => c.LibroFondo))].sort();
+  document.getElementById('fEmpresa').innerHTML = '<option value="">Todas las empresas</option>' + empresas.map(e=>`<option>${e}</option>`).join('');
+  document.getElementById('fLibro').innerHTML  = '<option value="">Todos los libros</option>' + libros.map(l=>`<option>${l}</option>`).join('');
+  ['fEmpresa','fLibro','fTramo','fBusqueda'].forEach(id => {
+    document.getElementById(id).oninput = redrawCheques;
+  });
+}
+
+function filtrarPorEmpresa(n) { document.getElementById('fEmpresa').value = n; redrawCheques(); scrollToTabla(); }
+function filtrarPorLibro(l)   { document.getElementById('fLibro').value = l;   redrawCheques(); scrollToTabla(); }
+function filtrarPorBenef(b)   { document.getElementById('fBusqueda').value = b; redrawCheques(); scrollToTabla(); }
+function scrollToTabla() { document.getElementById('tblCheques').scrollIntoView({behavior:'smooth', block:'start'}); }
+
+function redrawCheques() {
+  const fe = document.getElementById('fEmpresa').value;
+  const fl = document.getElementById('fLibro').value;
+  const ft = document.getElementById('fTramo').value;
+  const fq = document.getElementById('fBusqueda').value.trim().toLowerCase();
+  const filtrados = DATA.cheques.filter(c => {
+    if (fe && (c.NombreEmpresa||c.EmpresaId) !== fe) return false;
+    if (fl && c.LibroFondo !== fl) return false;
+    if (ft === '7'      && !(c.DiasAlPago <= 7))  return false;
+    if (ft === '30'     && !(c.DiasAlPago <= 30)) return false;
+    if (ft === '60'     && !(c.DiasAlPago <= 60)) return false;
+    if (ft === 'futuro' && !(c.DiasAlPago > 60))  return false;
+    if (fq) {
+      const t = ((c.Beneficiario||'')+' '+(c.NumeroCheque||'')).toLowerCase();
+      if (t.indexOf(fq) < 0) return false;
+    }
+    return true;
+  });
+  const total = filtrados.reduce((s,c)=>s+(+c.Importe||0),0);
+  document.getElementById('fResumen').innerHTML = `<b>${filtrados.length}</b> cheques · Total <b>${fmtSg(total)}</b>`;
+
+  document.getElementById('tblCheques').innerHTML = `
+    <thead><tr>
+      <th>Empresa</th><th>Libro</th><th>Cuenta</th><th>Nro cheque</th>
+      <th>Emisión</th><th>Pago diferido</th><th class="num">Días</th>
+      <th>Beneficiario</th><th class="num">Importe</th>
+    </tr></thead>
+    <tbody>
+      ${filtrados.slice(0, 2000).map(c=>`<tr>
+        <td>${c.NombreEmpresa||c.EmpresaId}</td>
+        <td>${c.LibroFondo||''}</td>
+        <td class="muted">${c.CuentaBancaria||''}</td>
+        <td class="muted">${c.NumeroCheque||''}</td>
+        <td>${fmtDate(c.FechaEmision)}</td>
+        <td>${fmtDate(c.FechaPagoDiferido)}</td>
+        <td class="num ${c.DiasAlPago<=7?'warn':'muted'}" data-sort-val="${c.DiasAlPago}">${c.DiasAlPago}</td>
+        <td>${c.Beneficiario||'<span class="muted">(sin beneficiario)</span>'}</td>
+        <td class="num" data-sort-val="${+c.Importe||0}"><b>${fmtSg(+c.Importe)}</b></td>
+      </tr>`).join('')}
+      ${filtrados.length > 2000 ? `<tr><td colspan="9" class="muted" style="text-align:center;padding:12px">(mostrando primeros 2000 de ${filtrados.length} — filtrá para acotar)</td></tr>` : ''}
+    </tbody>`;
+  attachTableSort(document.getElementById('tblCheques'));
+}
+</script>
+</body>
+</html>

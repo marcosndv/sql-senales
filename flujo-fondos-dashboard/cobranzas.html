@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Flujo de Fondos · Facturas a cobrar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body data-page="cobranzas">
+
+<main class="content">
+  <header class="page-header">
+    <div>
+      <h1>Facturas a cobrar</h1>
+      <div class="updated">Últ. actualización: <span id="lastUpdated">-</span></div>
+    </div>
+    <div><button class="btn" onclick="location.reload()">Recargar</button></div>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Facturas por antigüedad</h2>
+      <div class="chart-wrap"><canvas id="chartAntiguedad"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Top clientes (por importe)</h2>
+      <div class="scroll"><table id="tblTop"></table></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Por empresa</h2>
+      <div class="scroll"><table id="tblEmpresas"></table></div>
+    </div>
+    <div class="card">
+      <h2>Distribución por empresa</h2>
+      <div class="chart-wrap"><canvas id="chartEmpresas"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid wide">
+    <div class="card">
+      <h2>Detalle de facturas</h2>
+      <div class="filters">
+        <input type="text" id="fEmpresa" list="dlEmpresa" placeholder="Empresa (escribí o elegí)" autocomplete="off">
+        <datalist id="dlEmpresa"></datalist>
+        <input type="text" id="fCliente" list="dlCliente" placeholder="Cliente (nombre o CUIT)" autocomplete="off">
+        <datalist id="dlCliente"></datalist>
+        <select id="fAntiguedad">
+          <option value="">Toda antigüedad</option>
+          <option value="a-vencer">A vencer</option>
+          <option value="vencidas">Vencidas</option>
+          <option value=">30">Vencidas &gt; 30 días</option>
+          <option value=">60">Vencidas &gt; 60 días</option>
+          <option value=">90">Vencidas &gt; 90 días</option>
+        </select>
+        <input type="text" id="fBusqueda" placeholder="Buscar en número / comentario...">
+        <span id="fResumen" class="muted"></span>
+      </div>
+      <div class="tabs" style="margin-bottom:12px">
+        <button data-view="lista" class="active" onclick="setVista('lista')">Lista</button>
+        <button data-view="agrupado" onclick="setVista('agrupado')">Agrupado por cliente</button>
+      </div>
+      <div class="scroll tall"><table id="tblFacturas"></table></div>
+    </div>
+  </div>
+</main>
+
+<script src="assets/layout.js"></script>
+<script>
+let DATA = null;
+let VISTA = 'lista';
+let chartAnt = null, chartEmp = null;
+
+fetchPageData(d => {
+  DATA = d;
+  renderSidebar({
+    proveedores: DATA.counters?.proveedores ?? '',
+    'cheques-propios': DATA.counters?.chequesPropios ?? '',
+    prestamos: DATA.counters?.prestamos ?? '',
+    planes: DATA.counters?.planes ?? '',
+    ingresos: DATA.counters?.ingresos ?? '',
+    cobranzas: DATA.counters?.cobranzas ?? ''
+  });
+  render();
+});
+
+function render() {
+  document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);
+  renderKpis();
+  renderChartAntiguedad();
+  renderChartEmpresas();
+  renderTop();
+  renderTablaEmpresas();
+  initFiltros();
+  redrawFacturas();
+}
+
+function renderKpis() {
+  const t = DATA.totales;
+  const ra = DATA.resumenAntiguas || {CantFacturas:0, TotalACobrar:0};
+  const notaAnt = ra.CantFacturas > 0
+    ? `<div class="sub" style="font-size:10.5px;color:#a08a5b;margin-top:4px">+${fmt(ra.CantFacturas)} facts &gt; 36m ocultas (${fmtSg(ra.TotalACobrar)})</div>`
+    : '';
+  const k = [
+    {label:'Total a cobrar (neto)',  value:t.TotalACobrar,       type:'pos', sub:`${fmt(t.CantClientesDeuda)} clientes con deuda · ${fmt(t.CantFacturas)} facts`, nota:notaAnt},
+    {label:'A favor cliente (NC)',   value:t.TotalAFavorCliente, type:'warn', sub:`${fmt(t.CantClientesAFavor)} clientes con NC a favor`},
+    {label:'Total vencido',          value:t.TotalVencido,       type:'neg',  sub:`${fmt(t.CantVencidas)} facturas`},
+    {label:'Empresas',               value:null, type:'info', sub:`${fmt(t.CantEmpresas)} empresas`},
+  ];
+  document.getElementById('kpis').innerHTML = k.map(x => `
+    <div class="kpi ${x.type}">
+      <div class="label">${x.label}</div>
+      <div class="value">${x.value!=null ? fmtSg(x.value) : x.sub.split(' ')[0]}</div>
+      <div class="sub">${x.value!=null ? x.sub : ''}</div>
+      ${x.nota || ''}
+    </div>`).join('');
+}
+
+function renderChartAntiguedad() {
+  const rows = DATA.porAntiguedad || [];
+  const labels = rows.map(r => r.Tramo);
+  const data = rows.map(r => +r.TotalACobrar||0);
+  const colors = labels.map(t => t.includes('Cancelado')||t.includes('A Vencer') ? '#10b981' : t.includes('30')||t.includes('60') ? '#f59e0b' : '#ef4444');
+  if (chartAnt) chartAnt.destroy();
+  chartAnt = new Chart(document.getElementById('chartAntiguedad'), {
+    type: 'bar',
+    data: {labels, datasets: [{data, backgroundColor:colors, borderRadius:6}]},
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins: {legend:{display:false}, tooltip:{callbacks:{label:c=>fmtSg(c.parsed.y)}}},
+      scales:{y:{ticks:{callback:v=>fmt(v/1e6)+' M'}}, x:{ticks:{font:{size:10}}}}
+    }
+  });
+}
+
+function renderChartEmpresas() {
+  const rows = (DATA.porEmpresa||[]).slice(0, 10);
+  const labels = rows.map(r => r.NombreEmpresa || r.EmpresaId);
+  const data = rows.map(r => +r.TotalACobrar||0);
+  if (chartEmp) chartEmp.destroy();
+  chartEmp = new Chart(document.getElementById('chartEmpresas'), {
+    type: 'bar',
+    data: {labels, datasets:[{label:'A cobrar', data, backgroundColor:'#10b981', borderRadius:6}]},
+    options: {
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtSg(c.parsed.x)}}},
+      scales:{x:{ticks:{callback:v=>fmt(v/1e6)+' M'}}}
+    }
+  });
+}
+
+function renderTop() {
+  const rows = DATA.topClientes || [];
+  const tot = rows.reduce((a,r)=>({T:a.T+(+r.TotalACobrar||0), V:a.V+(+r.TotalVencido||0), A:a.A+(+r.SaldoAFavor||0), F:a.F+(+r.CantMovs||0)}),{T:0,V:0,A:0,F:0});
+  document.getElementById('tblTop').innerHTML = `
+    <thead><tr>
+      <th>Cliente</th><th>CUIT</th><th class="num">Movs</th><th class="num">Saldo neto</th><th class="num">Vencido</th><th class="num">NC a favor</th>
+    </tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr onclick="filtrarPorCliente('${r.CUIT}')" style="cursor:pointer">
+        <td>${r.NombreCliente||''}</td>
+        <td class="muted">${r.CUIT||''}</td>
+        <td class="num">${r.CantMovs}</td>
+        <td class="num"><b>${fmtSg(+r.TotalACobrar)}</b></td>
+        <td class="num ${(+r.TotalVencido>0)?'neg':''}">${fmtSg(+r.TotalVencido)}</td>
+        <td class="num ${(+r.SaldoAFavor<0)?'warn':'muted'}">${fmtSg(+r.SaldoAFavor)}</td>
+      </tr>`).join('')}
+      <tr class="total"><td>TOTAL top ${rows.length}</td><td></td><td class="num">${tot.F}</td><td class="num">${fmtSg(tot.T)}</td><td class="num neg">${fmtSg(tot.V)}</td><td class="num warn">${fmtSg(tot.A)}</td></tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblTop'));
+}
+
+function renderTablaEmpresas() {
+  const rows = DATA.porEmpresa || [];
+  const tot = rows.reduce((a,r)=>({T:a.T+(+r.TotalACobrar||0), V:a.V+(+r.TotalVencido||0), A:a.A+(+r.SaldoAFavor||0), F:a.F+(+r.CantFacturas||0)}),{T:0,V:0,A:0,F:0});
+  document.getElementById('tblEmpresas').innerHTML = `
+    <thead><tr><th>Empresa</th><th class="num">Movs</th><th class="num">Saldo neto</th><th class="num">Vencido</th><th class="num">NC a favor</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`<tr onclick="filtrarPorEmpresa('${r.NombreEmpresa||r.EmpresaId}')" style="cursor:pointer">
+        <td>${r.NombreEmpresa || r.EmpresaId}</td>
+        <td class="num">${r.CantFacturas}</td>
+        <td class="num"><b>${fmtSg(+r.TotalACobrar)}</b></td>
+        <td class="num ${(+r.TotalVencido>0)?'neg':''}">${fmtSg(+r.TotalVencido)}</td>
+        <td class="num ${(+r.SaldoAFavor<0)?'warn':'muted'}">${fmtSg(+r.SaldoAFavor)}</td>
+      </tr>`).join('')}
+      <tr class="total"><td>TOTAL</td><td class="num">${tot.F}</td><td class="num">${fmtSg(tot.T)}</td><td class="num neg">${fmtSg(tot.V)}</td><td class="num warn">${fmtSg(tot.A)}</td></tr>
+    </tbody>`;
+  attachTableSort(document.getElementById('tblEmpresas'));
+}
+
+function initFiltros() {
+  const empresas = [...new Set(DATA.facturas.map(f => f.NombreEmpresa || f.EmpresaId).filter(Boolean))].sort();
+  const clientesMap = new Map();
+  DATA.facturas.forEach(f => {
+    const key = `${f.NombreCliente||''} (${f.CUIT||''})`;
+    if (!clientesMap.has(key)) clientesMap.set(key, {nombre:f.NombreCliente||'', cuit:f.CUIT||''});
+  });
+  document.getElementById('dlEmpresa').innerHTML = empresas.map(e=>`<option value="${e}">`).join('');
+  document.getElementById('dlCliente').innerHTML = [...clientesMap.keys()].sort().map(k=>`<option value="${k}">`).join('');
+  ['fEmpresa','fCliente','fAntiguedad','fBusqueda'].forEach(id => {
+    document.getElementById(id).oninput = redrawFacturas;
+  });
+}
+
+function filtrarPorEmpresa(nombre) {
+  document.getElementById('fEmpresa').value = nombre;
+  document.getElementById('fBusqueda').value = '';
+  document.getElementById('fCliente').value = '';
+  redrawFacturas();
+  document.getElementById('tblFacturas').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function filtrarPorCliente(cuit) {
+  const f = DATA.facturas.find(x => x.CUIT === cuit);
+  document.getElementById('fCliente').value = f ? `${f.NombreCliente||''} (${cuit})` : cuit;
+  document.getElementById('fEmpresa').value = '';
+  document.getElementById('fBusqueda').value = '';
+  redrawFacturas();
+  document.getElementById('tblFacturas').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function setVista(v) {
+  VISTA = v;
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  redrawFacturas();
+}
+
+function aplicarFiltros() {
+  const fe = document.getElementById('fEmpresa').value.trim();
+  const fc = document.getElementById('fCliente').value.trim();
+  const fa = document.getElementById('fAntiguedad').value;
+  const fq = document.getElementById('fBusqueda').value.trim().toLowerCase();
+  const fcLow = fc.toLowerCase();
+  return DATA.facturas.filter(f => {
+    if (fe && ((f.NombreEmpresa||f.EmpresaId)||'').toLowerCase().indexOf(fe.toLowerCase()) < 0) return false;
+    if (fc) {
+      const nomCui = `${f.NombreCliente||''} (${f.CUIT||''})`.toLowerCase();
+      if (nomCui.indexOf(fcLow) < 0 && (f.CUIT||'').toLowerCase().indexOf(fcLow) < 0) return false;
+    }
+    if (fa === 'a-vencer' && f.DiasAtraso > 0) return false;
+    if (fa === 'vencidas' && f.DiasAtraso <= 0) return false;
+    if (fa === '>30'  && !(f.DiasAtraso > 30))  return false;
+    if (fa === '>60'  && !(f.DiasAtraso > 60))  return false;
+    if (fa === '>90'  && !(f.DiasAtraso > 90))  return false;
+    if (fq) {
+      const t = ((f.Numero||'')+' '+(f.Comentario||'')+' '+(f.NombreCliente||'')).toLowerCase();
+      if (t.indexOf(fq) < 0) return false;
+    }
+    return true;
+  });
+}
+
+function redrawFacturas() {
+  const filtradas = aplicarFiltros();
+  const totP = filtradas.reduce((s,f)=>s+(+f.SaldoPendiente||0),0);
+  const totV = filtradas.filter(f=>f.DiasAtraso>0).reduce((s,f)=>s+(+f.SaldoPendiente||0),0);
+  document.getElementById('fResumen').innerHTML = `<b>${filtradas.length}</b> facts · A cobrar <b>${fmtSg(totP)}</b> · Vencido <b class="neg">${fmtSg(totV)}</b>`;
+  if (VISTA === 'lista') renderVistaLista(filtradas);
+  else                    renderVistaAgrupada(filtradas);
+}
+
+function renderVistaLista(rows) {
+  document.getElementById('tblFacturas').innerHTML = `
+    <thead><tr>
+      <th>Empresa</th><th>Cliente</th><th>Tipo</th><th>Nro</th>
+      <th>Fecha</th><th>Vencimiento</th><th class="num">Días</th><th class="num">Pendiente</th><th>Comentario</th>
+    </tr></thead>
+    <tbody>
+      ${rows.slice(0, 2000).map(f=>{
+        const tipoBadge = 'badge info';
+        return `<tr>
+        <td>${f.NombreEmpresa||f.EmpresaId}</td>
+        <td>${f.NombreCliente||''}<br><span class="muted" style="font-size:10.5px">${f.CUIT||''}</span></td>
+        <td><span class="${tipoBadge}">${f.Tipo||''}</span></td>
+        <td class="muted">${f.Numero||''}</td>
+        <td>${fmtDate(f.FechaFactura)}</td>
+        <td>${fmtDate(f.FechaVencimiento)}</td>
+        <td class="num ${f.DiasAtraso>0 ?'neg':'muted'}">${f.DiasAtraso}</td>
+        <td class="num" data-sort-val="${+f.SaldoPendiente||0}"><b>${fmtSg(+f.SaldoPendiente)}</b></td>
+        <td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(f.Comentario||'').substring(0,80)}</td>
+      </tr>`;}).join('')}
+      ${rows.length > 2000 ? `<tr><td colspan="9" class="muted" style="text-align:center;padding:12px">(mostrando primeras 2000 de ${rows.length} — filtrá para acotar)</td></tr>` : ''}
+    </tbody>`;
+  attachTableSort(document.getElementById('tblFacturas'));
+}
+
+function renderVistaAgrupada(rows) {
+  const groups = {};
+  rows.forEach(f => {
+    const k = f.CUIT || 'SIN-CUIT';
+    if (!groups[k]) groups[k] = {cuit:k, nombre:f.NombreCliente||'', facts:[], total:0, vencido:0};
+    groups[k].facts.push(f);
+    groups[k].total += (+f.SaldoPendiente||0);
+    if (f.DiasAtraso > 0) groups[k].vencido += (+f.SaldoPendiente||0);
+  });
+  const arr = Object.values(groups).sort((a,b) => b.total - a.total);
+  const html = arr.map((g, i) => {
+    const gid = 'g'+i;
+    const facts = g.facts.map(f=>`<tr class="group-child ${gid} hidden">
+      <td></td>
+      <td>${f.NombreEmpresa||f.EmpresaId}</td>
+      <td><span class="badge info">${f.Tipo||''}</span></td>
+      <td class="muted">${f.Numero||''}</td>
+      <td>${fmtDate(f.FechaFactura)}</td>
+      <td>${fmtDate(f.FechaVencimiento)}</td>
+      <td class="num ${f.DiasAtraso>0?'neg':'muted'}">${f.DiasAtraso}</td>
+      <td class="num">${fmtSg(+f.SaldoPendiente)}</td>
+      <td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(f.Comentario||'').substring(0,60)}</td>
+    </tr>`).join('');
+    return `<tr class="group-header" onclick="toggleGroup('${gid}', this)">
+        <td>▸</td>
+        <td colspan="6"><b>${g.nombre}</b> <span class="muted">${g.cuit} · ${g.facts.length} facts</span></td>
+        <td class="num"><b>${fmtSg(g.total)}</b></td>
+        <td class="num neg">${fmtSg(g.vencido)}</td>
+      </tr>${facts}`;
+  }).join('');
+  document.getElementById('tblFacturas').innerHTML = `
+    <thead><tr class="no-sort"><th style="width:20px"></th><th>Empresa</th><th>Tipo</th><th>Nro</th><th>Fecha</th><th>Vencimiento</th><th class="num">Días</th><th class="num">Pendiente</th><th>Comentario / Vencido</th></tr></thead>
+    <tbody>${html}</tbody>`;
+}
+function toggleGroup(gid, tr) {
+  const rows = document.querySelectorAll('.group-child.'+gid);
+  const first = rows[0];
+  const hidden = first && first.classList.contains('hidden');
+  rows.forEach(r => r.classList.toggle('hidden', !hidden));
+  tr.children[0].textContent = hidden ? '▾' : '▸';
+}
+</script>
+</body>
+</html>
