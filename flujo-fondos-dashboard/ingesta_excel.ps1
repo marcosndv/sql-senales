@@ -470,7 +470,11 @@ FROM dbo.Manual_Impositivo WHERE _archivoOrigen = $(SqlStr $archivo);
 
 $soloFlag = $SoloBancos -or $SoloTarjetas -or $SoloPrestamos -or $SoloPlanes -or $SoloImpositivo
 $hazBancos     = -not $soloFlag -or $SoloBancos
-$hazTarjetas   = -not $soloFlag -or $SoloTarjetas
+# Tarjetas: DEPRECADO. La fuente autoritativa paso a ser datapos.liquidacion
+# (ver sql/flujo_fondos/03_vw_proyectado.sql). El Excel se llenaba a mano
+# copiando datapos, asi que no aporta info nueva. Se deja la funcion como
+# fallback debug: solo corre si se pide explicitamente con -SoloTarjetas.
+$hazTarjetas   = [bool]$SoloTarjetas
 $hazPrestamos  = -not $soloFlag -or $SoloPrestamos
 $hazPlanes     = -not $soloFlag -or $SoloPlanes
 $hazImpositivo = -not $soloFlag -or $SoloImpositivo
