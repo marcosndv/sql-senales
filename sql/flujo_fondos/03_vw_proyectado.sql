@@ -7,21 +7,27 @@
 CREATE OR ALTER VIEW dbo.vw_FlujoFondos_Proyectado AS
 WITH Hoy AS (SELECT CAST(GETDATE() AS DATE) AS D),
 Base AS (
-    -- Entradas: acreditaciones de tarjetas PENDIENTE
+    -- Entradas: acreditaciones de tarjetas PENDIENTES desde Datapos.
+    -- Reemplaza la ex-fuente dbo.Manual_AcreditacionesTarjetas (Excel manual).
+    -- "Pendiente" = fecha de acreditación >= hoy (equivalente al Estado='PENDIENTE'
+    -- del Excel; Datapos trae siempre la fecha de acreditación real).
     SELECT
-        CAST(a.FechaAcreditacion AS DATE)              AS Fecha,
+        dl.fecha                                       AS Fecha,
         COALESCE(m.Empresa, 'SIN_EMPRESA')             AS Empresa,
-        a.RazonSocialExcel                             AS RazonSocial,
+        dl.comercio                                    AS RazonSocial,
         'ENTRADA'                                      AS Tipo,
         'Tarjetas'                                     AS Origen,
         'Acreditación tarjeta pendiente'               AS Concepto,
-        NULL                                           AS Detalle,
-        ISNULL(a.Acreditado, a.Vendido)                AS Importe,
-        'MANUAL_TARJETAS'                              AS FuenteTabla
-    FROM dbo.Manual_AcreditacionesTarjetas a
-    LEFT JOIN dbo.Config_MapeoRazonSocial m ON m.RazonSocialExcel = a.RazonSocialExcel
-    WHERE a.Estado = 'PENDIENTE'
-      AND ISNULL(a.Acreditado, a.Vendido) > 0
+        CONCAT(dl.marca, ' · ', dl.tarjeta, ' · liq ', dl.liq_nro) AS Detalle,
+        dl.t_acreditado                                AS Importe,
+        'DATAPOS_LIQUIDACION'                          AS FuenteTabla
+    FROM datapos.liquidacion dl
+    LEFT JOIN dbo.Config_MapeoEstablecimientoDatapos m
+        ON m.Marca = dl.marca
+       AND m.Establecimiento = dl.establecimiento
+       AND m.Comercio = dl.comercio
+    WHERE dl.fecha >= CAST(GETDATE() AS DATE)
+      AND dl.t_acreditado > 0
 
     UNION ALL
 
