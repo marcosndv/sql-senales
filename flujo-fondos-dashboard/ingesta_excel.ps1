@@ -26,6 +26,15 @@ $root   = Split-Path $PSScriptRoot -Parent
 $helper = Join-Path $root 'sql.ps1'
 if (-not (Test-Path $helper)) { throw "No se encuentra sql.ps1 en $root" }
 
+# Auto-fallback: en algunos Drives la subcarpeta es "TESORERIA - GV (1)" en vez de "TESORERIA - GV"
+$__fallback = @('TESORERIA - GV (1)')
+foreach ($alt in $__fallback) {
+    if (-not (Test-Path $PathBancos))    { $tmp = $PathBancos    -replace 'TESORERIA - GV\\', "$alt\"; if (Test-Path $tmp) { $PathBancos    = $tmp } }
+    if (-not (Test-Path $PathTarjetas))  { $tmp = $PathTarjetas  -replace 'TESORERIA - GV\\', "$alt\"; if (Test-Path $tmp) { $PathTarjetas  = $tmp } }
+    if (-not (Test-Path $PathPrestamos)) { $tmp = $PathPrestamos -replace 'TESORERIA - GV\\', "$alt\"; if (Test-Path $tmp) { $PathPrestamos = $tmp } }
+    if (-not (Test-Path $PathPlanes))    { $tmp = $PathPlanes    -replace 'TESORERIA - GV\\', "$alt\"; if (Test-Path $tmp) { $PathPlanes    = $tmp } }
+}
+
 # --------- Helpers -----------------------------------------------------------
 
 function Invoke-SqlNonQuery {
