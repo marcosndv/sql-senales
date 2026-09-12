@@ -55,6 +55,35 @@ const fmtDate = s => { if (!s) return '-'; const d = new Date(s); if (isNaN(d)) 
 const fmtDateTime = s => { if (!s) return '-'; const d = new Date(s); if (isNaN(d)) return s; return d.toLocaleDateString('es-AR') + ' ' + d.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'}); };
 const cls  = n => n == null ? '' : n < 0 ? 'neg' : n > 0 ? 'pos' : '';
 
+// -------- Filtro global por empresa ----------
+// Guarda la selección en localStorage. "" = todas.
+const EMPRESA_STORAGE_KEY = 'ff.selectedEmpresa';
+
+function getSelectedEmpresa() {
+  return localStorage.getItem(EMPRESA_STORAGE_KEY) || '';
+}
+
+function setSelectedEmpresa(id) {
+  if (id) localStorage.setItem(EMPRESA_STORAGE_KEY, id);
+  else localStorage.removeItem(EMPRESA_STORAGE_KEY);
+  document.dispatchEvent(new CustomEvent('empresa-changed', {detail: {empresa: id}}));
+}
+
+// Filtra un array de rows dejando solo los que matchean con la empresa seleccionada.
+// key: nombre de la propiedad que contiene el EmpresaId (default 'EmpresaId').
+// Comparación case-insensitive porque el ERP tiene mix (EMPR0001 vs Empr0002).
+// Si no hay selección, devuelve rows tal cual.
+function filterByEmpresa(rows, key) {
+  const sel = getSelectedEmpresa();
+  if (!sel || !rows) return rows;
+  const k = key || 'EmpresaId';
+  const selL = sel.toLowerCase();
+  return rows.filter(r => {
+    const v = r[k] || r.Empresa || '';
+    return String(v).toLowerCase() === selL;
+  });
+}
+
 // -------- Sidebar ----------
 // counters: acepta el objeto DATA.counters completo tal como viene del backend.
 // Las páginas pasan sus keys tal cual (ver COUNTER_KEY_MAP).
@@ -68,7 +97,22 @@ const COUNTER_KEY_MAP = {
   'impositivo':      'impositivo',
 };
 
-function renderSidebar(counters) {
+// Deriva la lista de empresas desde cualquier tabla de detalle si el backend no la mandó.
+// Toma NombreEmpresa del row si existe.
+function deriveEmpresasFromData(data) {
+  if (!data) return [];
+  const buckets = [data.facturas, data.cheques, data.cuotas, data.movs, data.detalle,
+                   data.posicionCuentas, data.porEmpresa, data.posicionPorEmpresa];
+  const m = new Map();
+  buckets.forEach(rows => (rows || []).forEach(r => {
+    const id = r.EmpresaId || r.Empresa;
+    if (!id) return;
+    if (!m.has(id)) m.set(id, {EmpresaId: id, NombreEmpresa: r.NombreEmpresa || id});
+  }));
+  return Array.from(m.values());
+}
+
+function renderSidebar(counters, empresas) {
   const active = document.body.dataset.page || '';
   let currentGroup = null;
   const nav = PAGES.map(p => {
@@ -82,6 +126,24 @@ function renderSidebar(counters) {
     }
     return link;
   }).join('');
+  // Dropdown de empresa (filtro global). "Todas" = sin filtro.
+  // `empresas` puede ser: un array (lista explícita), o el DATA completo (deriva de las tablas).
+  const sel = getSelectedEmpresa();
+  let empSource;
+  if (Array.isArray(empresas)) empSource = empresas;
+  else if (empresas && typeof empresas === 'object') empSource = deriveEmpresasFromData(empresas);
+  else empSource = [];
+  if (!empSource || empSource.length === 0) empSource = deriveEmpresasFromData(window.DATA);
+  const empList = (empSource || []).slice().sort((a,b) =>
+    (a.NombreEmpresa||a.EmpresaId||'').localeCompare(b.NombreEmpresa||b.EmpresaId||'', 'es-AR'));
+  const opts = ['<option value="">Todas las empresas</option>']
+    .concat(empList.map(e => `<option value="${e.EmpresaId}"${e.EmpresaId===sel?' selected':''}>${e.NombreEmpresa || e.EmpresaId}</option>`))
+    .join('');
+  const dropdown = `
+    <div class="empresa-filter">
+      <label for="empresaSelect">Empresa</label>
+      <select id="empresaSelect">${opts}</select>
+    </div>`;
   const sidebar = document.createElement('aside');
   sidebar.className = 'sidebar';
   sidebar.innerHTML = `
@@ -89,9 +151,12 @@ function renderSidebar(counters) {
       <h2>Flujo Fondos</h2>
       <div class="sub">Señales · Grupo</div>
     </div>
+    ${dropdown}
     <nav>${nav}</nav>
   `;
   document.body.prepend(sidebar);
+  const sel$ = sidebar.querySelector('#empresaSelect');
+  if (sel$) sel$.addEventListener('change', e => setSelectedEmpresa(e.target.value));
   // Envolver el resto en .app
   const rest = document.querySelector('main.content');
   if (rest) {
@@ -125,6 +190,280 @@ function fetchPageData(cb) {
       console.error('fetchPageData:', err);
       alert('Error al cargar ' + url + ': ' + err.message);
     });
+}
+
+// -------- Filtro por empresa: recomputa agregados desde raw rows ----------
+// Recibe el data ORIGINAL de la página y aplica el filtro de sidebar.
+// Devuelve un objeto con el mismo shape pero:
+//   - raw rows filtrados (facturas, cheques, cuotas, movs, detalle, posicionCuentas, ...)
+//   - agregados (totales, porEmpresa, topN, ...) recomputados desde esos raw rows
+// Si no hay empresa seleccionada devuelve el original tal cual.
+// Recomputa agregados desde raw rows para el filtro por empresa del sidebar.
+// Limitaciones conocidas (agregados globales sin dimension Empresa a nivel SQL):
+//   - proyeccionPorDia / proyeccion30d del inicio (SUM por día, sin Empresa)
+//   - porMes de deuda-global (SUM por mes, sin Empresa)
+//   - mensual del consolidado (Cobros/PagosPorPeriodo agrupan por Empresa pero el
+//     merge inicial no expone la dimensión — queda global hasta refactor SQL)
+// Estos KPIs siguen mostrando datos globales incluso con filtro aplicado.
+function buildFilteredData(raw) {
+  const sel = getSelectedEmpresa();
+  if (!sel || !raw) return raw;
+  const page = document.body.dataset.page || '';
+  const out = Object.assign({}, raw);
+  const selL = sel.toLowerCase();
+  const same = v => String(v || '').toLowerCase() === selL;
+
+  // Helper: suma o cuenta agrupado por una key desde rows
+  const sumBy = (rows, keyFn, valFn) => {
+    const m = new Map();
+    (rows || []).forEach(r => {
+      const k = keyFn(r);
+      m.set(k, (m.get(k)||0) + (+valFn(r)||0));
+    });
+    return m;
+  };
+  const filt = (rows, key) => filterByEmpresa(rows, key || 'EmpresaId');
+
+  if (page === 'proveedores' || page === 'cobranzas') {
+    const facturas = filt(raw.facturas);
+    out.facturas = facturas;
+    // Recomputar agregados
+    const isCob = page === 'cobranzas';
+    const totalKey = isCob ? 'TotalACobrar' : 'TotalPendiente';
+    const notaKeyPre = isCob ? 'TotalACobrar' : 'TotalPendiente';
+    // Solo cuentan facturas no antiguas (misma regla que SQL)
+    const activas = facturas.filter(f => (+f.EsAntigua || 0) !== 1);
+    const totPend = activas.filter(f => +f.SaldoPendiente > 0).reduce((s,f)=>s+(+f.SaldoPendiente||0),0);
+    const totAFavor = activas.filter(f => +f.SaldoPendiente < 0).reduce((s,f)=>s+(+f.SaldoPendiente||0),0);
+    const totVenc = activas.filter(f => f.DiasAtraso > 0 && +f.SaldoPendiente > 0).reduce((s,f)=>s+(+f.SaldoPendiente||0),0);
+    const cantVenc = activas.filter(f => f.DiasAtraso > 0 && +f.SaldoPendiente > 0).length;
+    // Contadores por CUIT
+    const porCuit = new Map();
+    activas.forEach(f => {
+      const s = porCuit.get(f.CUIT) || 0;
+      porCuit.set(f.CUIT, s + (+f.SaldoPendiente||0));
+    });
+    let cantDeuda = 0, cantAFavor = 0;
+    porCuit.forEach(v => { if (v > 0) cantDeuda++; else if (v < 0) cantAFavor++; });
+    out.totales = Object.assign({}, raw.totales, {
+      [totalKey]: totPend,
+      TotalAFavor: isCob ? undefined : totAFavor,
+      TotalAFavorCliente: isCob ? totAFavor : undefined,
+      CantProveedoresDeuda: isCob ? undefined : cantDeuda,
+      CantClientesDeuda:    isCob ? cantDeuda : undefined,
+      CantProveedoresAFavor: isCob ? undefined : cantAFavor,
+      CantClientesAFavor:    isCob ? cantAFavor : undefined,
+      CantFacturas: activas.filter(f => +f.SaldoPendiente > 0).length,
+      CantEmpresas: 1,
+      TotalVencido: totVenc,
+      CantVencidas: cantVenc,
+    });
+    // porEmpresa queda con 1 sola fila
+    out.porEmpresa = (raw.porEmpresa || []).filter(e => same(e.EmpresaId));
+    // porAntiguedad recomputado
+    const tramos = new Map();
+    activas.filter(f => +f.SaldoPendiente > 0).forEach(f => {
+      const d = +f.DiasAtraso || 0;
+      let t = 'Cancelado';
+      if (d <= 0) t = 'A vencer';
+      else if (d <= 30) t = '1-30 días';
+      else if (d <= 60) t = '31-60 días';
+      else if (d <= 90) t = '61-90 días';
+      else t = '> 90 días';
+      const cur = tramos.get(t) || {Tramo:t, CantFacturas:0, [totalKey]:0, TotalPendiente:0};
+      cur.CantFacturas++;
+      cur[totalKey] += (+f.SaldoPendiente||0);
+      cur.TotalPendiente += (+f.SaldoPendiente||0);
+      tramos.set(t, cur);
+    });
+    out.porAntiguedad = Array.from(tramos.values());
+    // Top proveedores/clientes recomputado
+    const porC = new Map();
+    activas.forEach(f => {
+      const cur = porC.get(f.CUIT) || {CUIT:f.CUIT, NombreProveedor:f.NombreProveedor, NombreCliente:f.NombreCliente, CantEmpresas:1, CantMovs:0, TotalPendiente:0, TotalACobrar:0, SaldoAFavor:0, TotalVencido:0};
+      cur.CantMovs++;
+      cur.TotalPendiente += (+f.SaldoPendiente||0);
+      cur.TotalACobrar += (+f.SaldoPendiente||0);
+      if (+f.SaldoPendiente < 0) cur.SaldoAFavor += (+f.SaldoPendiente||0);
+      if (f.DiasAtraso > 0 && +f.SaldoPendiente > 0) cur.TotalVencido += (+f.SaldoPendiente||0);
+      porC.set(f.CUIT, cur);
+    });
+    const topKey = isCob ? 'topClientes' : 'topProveedores';
+    out[topKey] = Array.from(porC.values()).filter(r => r.TotalPendiente > 0).sort((a,b)=>b.TotalPendiente - a.TotalPendiente).slice(0, 50);
+    // resumenAntiguas: filas antigua para esta empresa
+    const antiguas = facturas.filter(f => (+f.EsAntigua||0) === 1 && +f.SaldoPendiente > 0);
+    out.resumenAntiguas = {
+      CantFacturas: antiguas.length,
+      TotalPendiente: antiguas.reduce((s,f)=>s+(+f.SaldoPendiente||0), 0),
+      TotalACobrar:   antiguas.reduce((s,f)=>s+(+f.SaldoPendiente||0), 0),
+    };
+  } else if (page === 'cheques-propios') {
+    const cheques = filt(raw.cheques);
+    out.cheques = cheques;
+    const tot = cheques.reduce((s,c)=>s+(+c.Importe||0), 0);
+    const in30 = cheques.filter(c => c.DiasAlPago >= 0 && c.DiasAlPago <= 30);
+    out.totales = Object.assign({}, raw.totales, {
+      CantCheques: cheques.length,
+      TotalImporte: tot,
+      CantEmpresas: 1,
+      Importe30d: in30.reduce((s,c)=>s+(+c.Importe||0),0),
+      Cant30d: in30.length,
+    });
+    out.porEmpresa = (raw.porEmpresa || []).filter(e => same(e.EmpresaId));
+    const banco = new Map();
+    cheques.forEach(c => {
+      const k = `${c.LibroFondo}|${c.CuentaBancaria}`;
+      const cur = banco.get(k) || {LibroFondo:c.LibroFondo, CuentaBancaria:c.CuentaBancaria, CantCheques:0, TotalImporte:0};
+      cur.CantCheques++; cur.TotalImporte += (+c.Importe||0);
+      banco.set(k, cur);
+    });
+    out.porBanco = Array.from(banco.values()).sort((a,b)=>b.TotalImporte-a.TotalImporte);
+    const benef = new Map();
+    cheques.filter(c => c.Beneficiario).forEach(c => {
+      const cur = benef.get(c.Beneficiario) || {Beneficiario:c.Beneficiario, CantCheques:0, TotalImporte:0};
+      cur.CantCheques++; cur.TotalImporte += (+c.Importe||0);
+      benef.set(c.Beneficiario, cur);
+    });
+    out.topBenefic = Array.from(benef.values()).sort((a,b)=>b.TotalImporte-a.TotalImporte).slice(0, 50);
+  } else if (page === 'prestamos' || page === 'planes') {
+    const cuotas = filt(raw.cuotas);
+    out.cuotas = cuotas;
+    const tot = cuotas.reduce((s,c)=>s+(+c.ImporteCuota||0),0);
+    const in30 = cuotas.filter(c => c.DiasAlPago >= 0 && c.DiasAlPago <= 30);
+    const alerta = cuotas.filter(c => (c.EstadoPlan||'').includes('IMPAGA'));
+    out.totales = Object.assign({}, raw.totales, {
+      CantCuotas: cuotas.length,
+      TotalImporte: tot,
+      CantEmpresas: 1,
+      CantEntidades: new Set(cuotas.map(c=>c.EntidadFinanciera)).size,
+      Importe30d: in30.reduce((s,c)=>s+(+c.ImporteCuota||0),0),
+      Cant30d: in30.length,
+      CantEnAlerta: alerta.length,
+      ImporteEnAlerta: alerta.reduce((s,c)=>s+(+c.ImporteCuota||0),0),
+    });
+    out.porEmpresa = (raw.porEmpresa || []).filter(e => same(e.EmpresaId));
+    const ent = new Map();
+    cuotas.forEach(c => {
+      const cur = ent.get(c.EntidadFinanciera) || {EntidadFinanciera:c.EntidadFinanciera, CantCuotas:0, TotalImporte:0, CantEmpresas:1};
+      cur.CantCuotas++; cur.TotalImporte += (+c.ImporteCuota||0);
+      ent.set(c.EntidadFinanciera, cur);
+    });
+    out.porEntidad = Array.from(ent.values()).sort((a,b)=>b.TotalImporte-a.TotalImporte);
+  } else if (page === 'ingresos') {
+    const movs = filt(raw.movs);
+    out.movs = movs;
+    const tot = movs.reduce((s,m)=>s+(+m.Importe||0),0);
+    const today = new Date().toISOString().slice(0,10);
+    const in30 = movs.filter(m => m.Fecha >= today && m.DiasACobrar <= 30);
+    const in7  = movs.filter(m => m.Fecha >= today && m.DiasACobrar <= 7);
+    out.totales = Object.assign({}, raw.totales, {
+      TotalImporte: tot,
+      CantMovs: movs.length,
+      CantEmpresas: 1,
+      CantOrigenes: new Set(movs.map(m=>m.Origen)).size,
+      Importe30d: in30.reduce((s,m)=>s+(+m.Importe||0),0),
+      Cant30d: in30.length,
+      Importe7d: in7.reduce((s,m)=>s+(+m.Importe||0),0),
+    });
+    out.porEmpresa = (raw.porEmpresa || []).filter(e => same(e.EmpresaId));
+    const orig = new Map();
+    movs.forEach(m => {
+      const cur = orig.get(m.Origen) || {Origen:m.Origen, CantMovs:0, TotalImporte:0, CantEmpresas:1};
+      cur.CantMovs++; cur.TotalImporte += (+m.Importe||0);
+      orig.set(m.Origen, cur);
+    });
+    out.porOrigen = Array.from(orig.values()).sort((a,b)=>b.TotalImporte-a.TotalImporte);
+  } else if (page === 'impositivo') {
+    const detalle = filt(raw.detalle, 'EmpresaExcel');
+    out.detalle = detalle;
+    const today = new Date().toISOString().slice(0,10);
+    const venc = detalle.filter(d => d.FechaVencimiento < today);
+    const avenc = detalle.filter(d => d.FechaVencimiento >= today);
+    out.totales = Object.assign({}, raw.totales, {
+      CantItems: detalle.length,
+      TotalPendiente: detalle.reduce((s,d)=>s+(+d.Importe||0),0),
+      TotalVencido: venc.reduce((s,d)=>s+(+d.Importe||0),0),
+      TotalAVencer: avenc.reduce((s,d)=>s+(+d.Importe||0),0),
+      CantEmpresas: 1,
+      CantGrupos: new Set(detalle.map(d=>d.Grupo)).size,
+    });
+    out.porEmpresa = (raw.porEmpresa || []).filter(e => same(e.EmpresaId));
+    const grp = new Map();
+    detalle.forEach(d => {
+      const cur = grp.get(d.Grupo) || {Grupo:d.Grupo, Cant:0, Total:0, Vencido:0};
+      cur.Cant++; cur.Total += (+d.Importe||0);
+      if (d.FechaVencimiento < today) cur.Vencido += (+d.Importe||0);
+      grp.set(d.Grupo, cur);
+    });
+    out.porGrupo = Array.from(grp.values()).sort((a,b)=>b.Total-a.Total);
+  } else if (page === 'deuda-global') {
+    // deuda-global no trae raw rows completo, solo agregados. Filtramos porEmpresa a 1 fila.
+    const emp = (raw.porEmpresa || []).filter(e => same(e.EmpresaId));
+    out.porEmpresa = emp;
+    const one = emp[0];
+    out.totales = Object.assign({}, raw.totales, one ? {
+      TotalDeuda: one.TotalDeuda, TotalVencido: one.Vencido,
+      TotalProx30: one.Prox30, CantItems: one.CantItems, CantEmpresas: 1,
+    } : {TotalDeuda:0, TotalVencido:0, TotalProx30:0, CantItems:0, CantEmpresas:0});
+    // porOrigen recomputado desde la sola empresa
+    out.porOrigen = one ? [
+      {Origen:'Proveedores', Cant:0, Total: one.Proveedores || 0, Vencido:0, Prox30:0},
+      {Origen:'Cheques propios', Cant:0, Total: one.ChequesPropios || 0, Vencido:0, Prox30:0},
+      {Origen:'Préstamos', Cant:0, Total: one.Prestamos || 0, Vencido:0, Prox30:0},
+      {Origen:'Planes ARCA', Cant:0, Total: one.PlanesArca || 0, Vencido:0, Prox30:0},
+    ].filter(x => x.Total > 0) : [];
+  } else if (page === 'consolidado') {
+    out.porEmpresa = (raw.porEmpresa || []).filter(e => same(e.EmpresaId));
+    const one = out.porEmpresa[0];
+    if (one) {
+      out.totalesAno = Object.assign({}, raw.totalesAno, {
+        IngresosAno: one.Ingresos, EgresosAno: one.Egresos,
+      });
+    }
+    // mensual: no se puede recomputar sin raw rows (los agregados vienen del SQL sin dimension Empresa)
+    // Por ahora dejamos mensual global. TODO: agregar Empresa a vw_CobrosPorPeriodo/vw_PagosPorPeriodo.
+  } else if (page === 'inicio') {
+    const cuentas = filt(raw.posicionCuentas);
+    out.posicionCuentas = cuentas;
+    const sum = (fld) => cuentas.reduce((s,c)=>s+(+c[fld]||0),0);
+    out.posicionTotales = Object.assign({}, raw.posicionTotales, {
+      CantCuentas: cuentas.length,
+      CantEmpresas: 1,
+      Saldo: sum('Saldo'),
+      FCI: sum('FCI'), MPago: sum('MPago'), Pix: sum('Pix'),
+      DescubiertoAutorizado: sum('DescubiertoAutorizado'),
+      Disponible: sum('Disponible'),
+      SaldoNegativo: cuentas.filter(c => +c.Saldo < 0).reduce((s,c)=>s+(+c.Saldo||0),0),
+      SaldoPositivo: cuentas.filter(c => +c.Saldo > 0).reduce((s,c)=>s+(+c.Saldo||0),0),
+    });
+    out.posicionPorEmpresa = (raw.posicionPorEmpresa || []).filter(e => same(e.Empresa));
+    // posicionPorBanco recomputado
+    const banco = new Map();
+    cuentas.forEach(c => {
+      const cur = banco.get(c.Banco) || {Banco:c.Banco, CantCuentas:0, Saldo:0, Disponible:0};
+      cur.CantCuentas++; cur.Saldo += (+c.Saldo||0); cur.Disponible += (+c.Disponible||0);
+      banco.set(c.Banco, cur);
+    });
+    out.posicionPorBanco = Array.from(banco.values()).sort((a,b)=>b.Disponible-a.Disponible);
+    // proyeccion30d + proyeccionPorDia: no se pueden recomputar sin raw rows con Empresa.
+  }
+
+  return out;
+}
+
+// Envuelve el render de una página con el filtro por empresa. La página guarda su DATA raw
+// y llama a esta función pasando su callback de render.
+function installEmpresaFilter(rawData, renderFn) {
+  const state = {raw: rawData};
+  const cycle = () => {
+    const filtered = buildFilteredData(state.raw);
+    renderFn(filtered);
+  };
+  document.addEventListener('empresa-changed', cycle);
+  cycle();
+  return {
+    updateRaw: (d) => { state.raw = d; cycle(); }
+  };
 }
 
 // -------- Tooltips en celdas truncadas ----------

@@ -34,6 +34,11 @@ aside.sidebar{background:var(--sidebar-bg);color:var(--sidebar-fg);padding:28px 
 aside.sidebar .brand{padding:0 24px 22px;border-bottom:1px solid var(--sidebar-hover);margin-bottom:16px}
 aside.sidebar .brand h2{margin:0;color:var(--sidebar-fg-hi);font-family:'Playfair Display',Georgia,serif;font-size:20px;font-weight:600;letter-spacing:-.01em;text-transform:none}
 aside.sidebar .brand .sub{font-size:10px;color:#7a9689;margin-top:4px;text-transform:uppercase;letter-spacing:.18em;font-weight:600}
+aside.sidebar .empresa-filter{padding:0 24px 18px;border-bottom:1px solid var(--sidebar-hover);margin-bottom:12px}
+aside.sidebar .empresa-filter label{display:block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#7a9689;margin-bottom:6px}
+aside.sidebar .empresa-filter select{width:100%;padding:8px 10px;border-radius:var(--radius-pill);border:1px solid var(--sidebar-hover);background:var(--sidebar-hover);color:var(--sidebar-fg-hi);font-size:12px;font-weight:500;font-family:inherit;cursor:pointer;outline:none;transition:border-color .12s}
+aside.sidebar .empresa-filter select:hover,aside.sidebar .empresa-filter select:focus{border-color:var(--accent)}
+aside.sidebar .empresa-filter select option{background:var(--sidebar-bg);color:var(--sidebar-fg-hi)}
 aside.sidebar nav{display:flex;flex-direction:column;gap:2px;padding:0 12px}
 aside.sidebar nav a{padding:10px 14px;border-radius:var(--radius-pill);font-size:12px;font-weight:500;color:#a6b8ae;display:flex;align-items:center;gap:12px;letter-spacing:.02em;transition:background .12s, color .12s}
 aside.sidebar nav a:hover{background:var(--sidebar-hover);color:var(--sidebar-fg-hi)}

@@ -71,9 +71,16 @@
 let DATA = null;
 let HORIZONTE_SEMANAS = 8;
 let chartSem = null;
+let DATA_RAW = null;
 
 fetchPageData(d => {
-  DATA = d;
+  DATA_RAW = d;
+  applyAndRender();
+});
+document.addEventListener('empresa-changed', applyAndRender);
+
+function applyAndRender() {
+  DATA = buildFilteredData(DATA_RAW);
   renderSidebar({
     proveedores: DATA.counters?.proveedores ?? '',
     'cheques-propios': DATA.counters?.chequesPropios ?? '',
@@ -81,9 +88,9 @@ fetchPageData(d => {
     planes: DATA.counters?.planes ?? '',
     ingresos: DATA.counters?.ingresos ?? '',
     cobranzas: DATA.counters?.cobranzas ?? ''
-  });
+  }, DATA.empresas);
   render();
-});
+}
 
 function render() {
   document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);

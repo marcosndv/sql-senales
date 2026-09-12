@@ -4,13 +4,20 @@
 // tabsVista (contenedor de tabs), viewCuotas, viewMatriz, tblMatriz
 // El HTML debe llamar renderPageCuotas({ tituloSingular, ... }) al final.
 
+let DATA_RAW = null;
 let DATA = null;
 let chartT = null;
 let VISTA_CUOTAS = 'cuotas'; // 'cuotas' | 'matriz'
 
 function renderPageCuotas(opts) {
   fetchPageData(d => {
-    DATA = d;
+    DATA_RAW = d;
+    applyAndRender();
+  });
+  document.addEventListener('empresa-changed', applyAndRender);
+
+  function applyAndRender() {
+    DATA = buildFilteredData(DATA_RAW);
     renderSidebar({
       proveedores: DATA.counters?.proveedores ?? '',
       'cheques-propios': DATA.counters?.chequesPropios ?? '',
@@ -18,9 +25,9 @@ function renderPageCuotas(opts) {
       planes: DATA.counters?.planes ?? '',
       ingresos: DATA.counters?.ingresos ?? '',
       cobranzas: DATA.counters?.cobranzas ?? ''
-    });
+    }, DATA.empresas);
     render();
-  });
+  }
 
   function render() {
     document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);

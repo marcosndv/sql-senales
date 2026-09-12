@@ -58,8 +58,15 @@
 let DATA = null;
 let chartGrp = null;
 
+let DATA_RAW = null;
 fetchPageData(d => {
-  DATA = d;
+  DATA_RAW = d;
+  applyAndRender();
+});
+document.addEventListener('empresa-changed', applyAndRender);
+
+function applyAndRender() {
+  DATA = buildFilteredData(DATA_RAW);
   renderSidebar({
     proveedores: DATA.counters?.proveedores ?? '',
     'cheques-propios': DATA.counters?.chequesPropios ?? '',
@@ -68,9 +75,9 @@ fetchPageData(d => {
     ingresos: DATA.counters?.ingresos ?? '',
     cobranzas: DATA.counters?.cobranzas ?? '',
     impositivo: DATA.counters?.impositivo ?? ''
-  });
+  }, DATA.empresas);
   render();
-});
+}
 
 function render() {
   document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);
