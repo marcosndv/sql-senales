@@ -34,6 +34,16 @@ if (-not $SkipIngesta) {
 Write-Host "► Consultando vistas..." -ForegroundColor Cyan
 
 # ================================================================
+#  Empresas activas (para filtro global del sidebar)
+# ================================================================
+$empresas = Invoke-SQL @"
+SELECT Empresa AS EmpresaId, NombreEmpresa
+FROM Config_Empresas
+WHERE Empresa IS NOT NULL AND Empresa <> 'SIN_EMPRESA'
+ORDER BY NombreEmpresa
+"@
+
+# ================================================================
 #  data-inicio.json — resumen liviano
 # ================================================================
 
@@ -102,7 +112,7 @@ WHERE Empresa = 'SIN_EMPRESA'
 "@
 
 # Contadores para el sidebar
-$counterProveedores = (Invoke-SQL "SELECT COUNT(*) AS N FROM (SELECT CUIT FROM vw_CtaCte_Proveedores WHERE TipoBase='OFICIAL' AND FECHA >= DATEADD(month, -36, GETDATE()) GROUP BY CUIT HAVING SUM(SaldoPendiente) > 0) x")[0].N
+$counterProveedores = (Invoke-SQL "SELECT COUNT(*) AS N FROM (SELECT CUIT FROM vw_CtaCte_Proveedores WHERE TipoBase='OFICIAL' AND FECHA >= '2026-01-01' GROUP BY CUIT HAVING SUM(SaldoPendiente) > 0) x")[0].N
 $counterCheques     = (Invoke-SQL "SELECT COUNT(*) AS N FROM vw_ChequesPropios_Pendientes WHERE TipoBase='OFICIAL' AND Importe > 0 AND FechaPagoDiferido >= CAST(GETDATE() AS DATE)")[0].N
 $counterPrestamos   = (Invoke-SQL "SELECT COUNT(*) AS N FROM vw_FlujoFondos_Prestamos WHERE Origen NOT LIKE 'Planes%' AND FechaVto >= CAST(GETDATE() AS DATE)")[0].N
 $counterPlanes      = (Invoke-SQL "SELECT COUNT(*) AS N FROM vw_FlujoFondos_Prestamos WHERE Origen     LIKE 'Planes%' AND FechaVto >= CAST(GETDATE() AS DATE)")[0].N
@@ -130,6 +140,7 @@ $dataInicio = [ordered]@{
     proyeccion30d      = $p30
     sinEmpresa         = $sinEmpresa
     counters           = $sidebarCounters
+    empresas           = $empresas
 }
 
 # ================================================================
@@ -138,13 +149,14 @@ $dataInicio = [ordered]@{
 
 # Nota: SaldoPendiente ya está firmado (positivo = deuda; negativo = saldo a favor por NC).
 # Los agregados suman con signo → saldo NETO. El detalle trae todo (incluye NC como filas negativas).
-# Filtro EsAntigua: facturas con FECHA > 36 meses se marcan y quedan fuera de los agregados.
-# El detalle las trae con el flag para poder mostrarlas con un toggle en la UI.
+# Filtro EsAntigua: facturas con FECHA < 2026-01-01 se marcan y quedan fuera de los agregados.
+# Motivo: el ERP arrastra suciedad pre-2026 (facturas ya pagadas sin cerrar RELACIONESCTASCTES).
+# Gerencia sabe que no debe más de 60-90 días. El detalle las trae con el flag para toggle en UI.
 $provTotales = (Invoke-SQL @"
 WITH PorProveedor AS (
     SELECT CUIT, SUM(SaldoPendiente) AS SaldoNeto
     FROM vw_CtaCte_Proveedores
-    WHERE TipoBase='OFICIAL' AND FECHA >= DATEADD(month, -36, GETDATE())
+    WHERE TipoBase='OFICIAL' AND FECHA >= '2026-01-01'
     GROUP BY CUIT
 )
 SELECT
@@ -152,10 +164,10 @@ SELECT
     SUM(CASE WHEN SaldoNeto < 0 THEN SaldoNeto ELSE 0 END)   AS TotalAFavor,
     COUNT(CASE WHEN SaldoNeto > 0 THEN 1 END)                AS CantProveedoresDeuda,
     COUNT(CASE WHEN SaldoNeto < 0 THEN 1 END)                AS CantProveedoresAFavor,
-    (SELECT COUNT(*) FROM vw_CtaCte_Proveedores WHERE TipoBase='OFICIAL' AND FECHA >= DATEADD(month, -36, GETDATE()) AND SaldoPendiente > 0) AS CantFacturas,
-    (SELECT COUNT(DISTINCT Empresa) FROM vw_CtaCte_Proveedores WHERE TipoBase='OFICIAL' AND FECHA >= DATEADD(month, -36, GETDATE())) AS CantEmpresas,
-    (SELECT SUM(SaldoPendiente) FROM vw_CtaCte_Proveedores WHERE TipoBase='OFICIAL' AND FECHA >= DATEADD(month, -36, GETDATE()) AND DiasVencido > 0 AND SaldoPendiente > 0) AS TotalVencido,
-    (SELECT COUNT(*)              FROM vw_CtaCte_Proveedores WHERE TipoBase='OFICIAL' AND FECHA >= DATEADD(month, -36, GETDATE()) AND DiasVencido > 0 AND SaldoPendiente > 0) AS CantVencidas
+    (SELECT COUNT(*) FROM vw_CtaCte_Proveedores WHERE TipoBase='OFICIAL' AND FECHA >= '2026-01-01' AND SaldoPendiente > 0) AS CantFacturas,
+    (SELECT COUNT(DISTINCT Empresa) FROM vw_CtaCte_Proveedores WHERE TipoBase='OFICIAL' AND FECHA >= '2026-01-01') AS CantEmpresas,
+    (SELECT SUM(SaldoPendiente) FROM vw_CtaCte_Proveedores WHERE TipoBase='OFICIAL' AND FECHA >= '2026-01-01' AND DiasVencido > 0 AND SaldoPendiente > 0) AS TotalVencido,
+    (SELECT COUNT(*)              FROM vw_CtaCte_Proveedores WHERE TipoBase='OFICIAL' AND FECHA >= '2026-01-01' AND DiasVencido > 0 AND SaldoPendiente > 0) AS CantVencidas
 FROM PorProveedor
 "@)[0]
 
@@ -165,7 +177,7 @@ SELECT
     SUM(SaldoPendiente)   AS TotalPendiente
 FROM vw_CtaCte_Proveedores
 WHERE TipoBase='OFICIAL' AND SaldoPendiente > 0
-  AND FECHA < DATEADD(month, -36, GETDATE())
+  AND FECHA < '2026-01-01'
 "@)[0]
 
 $provPorEmpresa = Invoke-SQL @"
@@ -177,7 +189,7 @@ SELECT v.Empresa AS EmpresaId, ce.NombreEmpresa,
                 THEN v.SaldoPendiente ELSE 0 END)                           AS TotalVencido
 FROM vw_CtaCte_Proveedores v
 LEFT JOIN Config_Empresas ce ON ce.Empresa = v.Empresa
-WHERE v.TipoBase='OFICIAL' AND v.FECHA >= DATEADD(month, -36, GETDATE())
+WHERE v.TipoBase='OFICIAL' AND v.FECHA >= '2026-01-01'
 GROUP BY v.Empresa, ce.NombreEmpresa
 HAVING SUM(v.SaldoPendiente) <> 0
 ORDER BY TotalPendiente DESC
@@ -187,7 +199,7 @@ $provPorAntiguedad = Invoke-SQL @"
 SELECT TramoVencimiento AS Tramo, COUNT(*) AS CantFacturas, SUM(SaldoPendiente) AS TotalPendiente
 FROM vw_CtaCte_Proveedores
 WHERE TipoBase='OFICIAL' AND SaldoPendiente > 0
-  AND FECHA >= DATEADD(month, -36, GETDATE())
+  AND FECHA >= '2026-01-01'
 GROUP BY TramoVencimiento
 ORDER BY MIN(DiasVencido)
 "@
@@ -201,7 +213,7 @@ SELECT TOP 50 CUIT, MAX(RazonSocial) AS NombreProveedor,
        SUM(CASE WHEN DiasVencido > 0 AND SaldoPendiente > 0
                 THEN SaldoPendiente ELSE 0 END)                        AS TotalVencido
 FROM vw_CtaCte_Proveedores
-WHERE TipoBase='OFICIAL' AND FECHA >= DATEADD(month, -36, GETDATE())
+WHERE TipoBase='OFICIAL' AND FECHA >= '2026-01-01'
 GROUP BY CUIT
 HAVING SUM(SaldoPendiente) > 0
 ORDER BY TotalPendiente DESC
@@ -220,7 +232,7 @@ SELECT v.Empresa AS EmpresaId, ce.NombreEmpresa,
        CONVERT(varchar(10), v.FechaVencimiento, 120) AS FechaVencimiento,
        v.SaldoPendiente, v.DiasVencido AS DiasAtraso,
        ISNULL(v.COMENTARIO, '') AS Comentario,
-       CASE WHEN v.FECHA < DATEADD(month, -36, GETDATE()) THEN 1 ELSE 0 END AS EsAntigua
+       CASE WHEN v.FECHA < '2026-01-01' THEN 1 ELSE 0 END AS EsAntigua
 FROM vw_CtaCte_Proveedores v
 LEFT JOIN Config_Empresas ce ON ce.Empresa = v.Empresa
 WHERE v.TipoBase='OFICIAL' AND v.SaldoPendiente <> 0
@@ -236,6 +248,7 @@ $dataProveedores = [ordered]@{
     topProveedores    = $provTopProveedores
     facturas          = $provFacturas
     counters          = $sidebarCounters
+    empresas          = $empresas
 }
 
 # ================================================================
@@ -309,6 +322,7 @@ $dataCheques = [ordered]@{
     topBenefic   = $chTopBenef
     cheques      = $chCheques
     counters     = $sidebarCounters
+    empresas     = $empresas
 }
 
 # ================================================================
@@ -368,6 +382,7 @@ ORDER BY FechaVto, ImporteCuota DESC
         porEmpresa  = $porEmpresa
         cuotas      = $cuotas
         counters    = $sidebarCounters
+        empresas    = $empresas
     }
 }
 
@@ -430,6 +445,7 @@ $dataIngresos = [ordered]@{
     porEmpresa  = $inPorEmpresa
     movs        = $inMovs
     counters    = $sidebarCounters
+    empresas    = $empresas
 }
 
 # ================================================================
@@ -534,6 +550,7 @@ $dataCobranzas = [ordered]@{
     topClientes       = $cobTopClientes
     facturas          = $cobFacturas
     counters          = $sidebarCounters
+    empresas          = $empresas
 }
 
 # ================================================================
@@ -597,6 +614,7 @@ $dataDeudaGlobal = [ordered]@{
     porEmpresa   = $dgPorEmpresa
     porMes       = $dgPorMes
     counters     = $sidebarCounters
+    empresas     = $empresas
 }
 
 # ================================================================
@@ -684,6 +702,7 @@ $dataConsolidado = [ordered]@{
     mensual      = $conMensual
     porEmpresa   = $conAnoPorEmpresa
     counters     = $sidebarCounters
+    empresas     = $empresas
 }
 
 # ================================================================
@@ -739,6 +758,7 @@ $dataImpositivo = [ordered]@{
     porEmpresa  = $impPorEmpresa
     detalle     = $impDetalle
     counters    = $sidebarCounters
+    empresas    = $empresas
 }
 
 # ================================================================

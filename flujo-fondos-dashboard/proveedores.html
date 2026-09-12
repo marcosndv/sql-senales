@@ -62,7 +62,7 @@
         </select>
         <input type="text" id="fBusqueda" placeholder="Buscar en número / comentario...">
         <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#4b6a5a;cursor:pointer">
-          <input type="checkbox" id="fIncluirAntiguas"> Incluir &gt; 36 meses
+          <input type="checkbox" id="fIncluirAntiguas"> Incluir facturas pre-2026
         </label>
         <span id="fResumen" class="muted"></span>
       </div>
@@ -77,12 +77,19 @@
 
 <script src="assets/layout.js"></script>
 <script>
+let DATA_RAW = null;
 let DATA = null;
 let VISTA = 'lista';
 let chartAnt = null, chartEmp = null;
 
 fetchPageData(d => {
-  DATA = d;
+  DATA_RAW = d;
+  applyAndRender();
+});
+document.addEventListener('empresa-changed', applyAndRender);
+
+function applyAndRender() {
+  DATA = buildFilteredData(DATA_RAW);
   renderSidebar({
     proveedores: DATA.counters?.proveedores ?? '',
     'cheques-propios': DATA.counters?.chequesPropios ?? '',
@@ -90,9 +97,9 @@ fetchPageData(d => {
     planes: DATA.counters?.planes ?? '',
     ingresos: DATA.counters?.ingresos ?? '',
     cobranzas: DATA.counters?.cobranzas ?? ''
-  });
+  }, DATA.empresas);
   render();
-});
+}
 
 function render() {
   document.getElementById('lastUpdated').textContent = fmtDateTime(DATA.lastUpdated);
@@ -109,7 +116,7 @@ function renderKpis() {
   const t = DATA.totales;
   const ra = DATA.resumenAntiguas || {CantFacturas:0, TotalPendiente:0};
   const notaAnt = ra.CantFacturas > 0
-    ? `<div class="sub" style="font-size:10.5px;color:#a08a5b;margin-top:4px">+${fmt(ra.CantFacturas)} facts &gt; 36m ocultas (${fmtSg(ra.TotalPendiente)})</div>`
+    ? `<div class="sub" style="font-size:10.5px;color:#a08a5b;margin-top:4px">+${fmt(ra.CantFacturas)} facts pre-2026 ocultas (${fmtSg(ra.TotalPendiente)})</div>`
     : '';
   const k = [
     {label:'Saldo pendiente (neto)', value:t.TotalPendiente, type:'warn', sub:`${fmt(t.CantProveedoresDeuda)} proveedores con deuda · ${fmt(t.CantFacturas)} facts`, nota:notaAnt},
