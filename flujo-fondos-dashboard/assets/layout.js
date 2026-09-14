@@ -176,12 +176,29 @@ function renderSidebar(counters, empresas) {
   }
 }
 
+// -------- Sesión embebida (intranet) ----------
+// server.js redirige /embed a index.html#s=<token>. Se guarda por pestaña y se manda
+// como Bearer en los JSON. Entrando directo por flujo.ripaconsultora.net no hay token (Access).
+const SESSION_STORAGE_KEY = 'ff.session';
+(function captureEmbedSession() {
+  const m = /^#s=(.+)$/.exec(location.hash);
+  if (!m) return;
+  try { sessionStorage.setItem(SESSION_STORAGE_KEY, m[1]); } catch (e) {}
+  history.replaceState(null, '', location.pathname + location.search);
+})();
+
+function getEmbedSession() {
+  try { return sessionStorage.getItem(SESSION_STORAGE_KEY); } catch (e) { return null; }
+}
+
 // -------- Fetch data.json ----------
 function fetchPageData(cb) {
   const page = document.body.dataset.page || 'inicio';
   const url = JSON_BY_PAGE[page] || 'data-inicio.json';
-  fetch(url + '?_=' + Date.now())
+  const session = getEmbedSession();
+  fetch(url + '?_=' + Date.now(), session ? { headers: { Authorization: 'Bearer ' + session } } : undefined)
     .then(r => {
+      if (r.status === 401) throw new Error('la sesión venció. Volvé a abrir el dashboard desde la intranet.');
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     })

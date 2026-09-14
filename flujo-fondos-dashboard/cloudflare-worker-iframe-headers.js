@@ -18,6 +18,7 @@ addEventListener('fetch', event => {
 const ALLOWED_FRAME_ANCESTORS =
   "frame-ancestors 'self' " +
   "https://v0-bi-client-intranet.vercel.app " +
+  "https://ripaconsultora.net " +
   "https://*.ripaconsultora.net; " +
   "connect-src 'self' http://127.0.0.1:*; " +
   "default-src https: 'unsafe-inline'";

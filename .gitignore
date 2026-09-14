@@ -26,5 +26,8 @@ desktop.ini
 flujo-fondos-dashboard/data-*.json
 flujo-fondos-dashboard/data.json
 
+# Secreto compartido con la intranet para el acceso embebido
+flujo-fondos-dashboard/.embed-secret
+
 # Logs
 logs/
