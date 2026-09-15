@@ -33,8 +33,9 @@ function Write-Log { param([string]$msg) Add-Content -Path $logFile -Value "$(Ge
 
 Write-Log "── Inicio refresh ──"
 try {
-    $out = & $export 2>&1 | Out-String
-    Write-Log $out.TrimEnd()
+    # *>&1 + linea a linea: queda en el log todo lo que se alcanzo a imprimir
+    # (Write-Host, Write-Warning de ingesta parcial) aunque despues falle.
+    & $export *>&1 | ForEach-Object { Write-Log "$_" }
     Write-Log "── OK ──`n"
     exit 0
 } catch {

@@ -6,7 +6,8 @@
 #   .\ingesta_excel.ps1 -SoloBancos              (solo saldos bancarios)
 #   .\ingesta_excel.ps1 -SoloTarjetas            (solo acreditaciones tarjetas)
 #
-# Requiere: sql.ps1 en la raíz + Excel instalado (COM Interop) + acceso a Google Drive montado en G:\.
+# Requiere: sql.ps1 en la raíz + xlsx_reader.ps1 al lado + acceso a Google Drive montado en G:\.
+# No usa Excel: los .xlsx se leen directo (ver xlsx_reader.ps1).
 
 [CmdletBinding()]
 param(
@@ -25,6 +26,7 @@ $ErrorActionPreference = 'Stop'
 $root   = Split-Path $PSScriptRoot -Parent
 $helper = Join-Path $root 'sql.ps1'
 if (-not (Test-Path $helper)) { throw "No se encuentra sql.ps1 en $root" }
+. (Join-Path $PSScriptRoot 'xlsx_reader.ps1')
 
 # Auto-fallback: en algunos Drives la subcarpeta es "TESORERIA - GV (1)" en vez de "TESORERIA - GV"
 $__fallback = @('TESORERIA - GV (1)')
@@ -90,23 +92,31 @@ function SqlStr {
     return "N'" + ($s -replace "'", "''") + "'"
 }
 
-# --------- Excel COM ---------------------------------------------------------
+# Columnas "Condicion" del Excel: =SI(vto="";"";SI(vto-HOY()<0;"VENCIDO";"POR VENCER")).
+# El lector xlsx devuelve el valor guardado (del dia en que se grabo el archivo), asi que
+# se recalcula con la fecha de hoy. Si la celda no tiene formula (carga manual), se respeta.
+function Get-Condicion {
+    param($CeldaCondicion, $ValorVencimiento)
+    if (-not $CeldaCondicion.Formula) { return ([string]$CeldaCondicion.Text).Trim() }
+    $vto = ConvertTo-SqlDate $ValorVencimiento
+    if (-not $vto) { return '' }
+    if ($vto -lt (Get-Date -Format 'yyyy-MM-dd')) { return 'VENCIDO' }
+    return 'POR VENCER'
+}
+
+# --------- Lectura de .xlsx --------------------------------------------------
 
 function Open-ExcelReadOnly {
     param([string]$Path)
-    if (-not (Test-Path $Path)) { throw "No existe: $Path" }
-    $xl = New-Object -ComObject Excel.Application
-    $xl.Visible = $false
-    $xl.DisplayAlerts = $false
-    $wb = $xl.Workbooks.Open($Path, 0, $true)
-    return @{ App = $xl; Book = $wb }
+    if (-not (Test-Path -LiteralPath $Path)) { throw "No existe: $Path" }
+    # Lector OpenXML propio (xlsx_reader.ps1), no Excel COM: no necesita Excel instalado
+    # ni licencia, y no abre dialogos invisibles que traben la task programada en VIGIL.
+    return @{ App = $null; Book = [FlujoXlsx.Workbook]::new($Path) }
 }
 
 function Close-Excel {
     param($ctx)
     if ($ctx.Book) { $ctx.Book.Close($false) }
-    if ($ctx.App)  { $ctx.App.Quit() }
-    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ctx.App) | Out-Null
 }
 
 # --------- Ingesta: BANCOS - GV / RESUMEN -----------------------------------
@@ -284,7 +294,7 @@ function Ingest-Prestamos {
                 ImporteCuota    = ConvertTo-SqlDecimal $ws.Cells.Item($r,11).Value2
                 FechaVto        = ConvertTo-SqlDate    $ws.Cells.Item($r,12).Value2
                 Estado          = ([string]$ws.Cells.Item($r,13).Text).Trim()
-                Condicion       = ([string]$ws.Cells.Item($r,15).Text).Trim()
+                Condicion       = Get-Condicion $ws.Cells.Item($r,15) $ws.Cells.Item($r,12).Value2
                 Op              = ([string]$ws.Cells.Item($r,16).Text).Trim()
                 Observacion     = ([string]$ws.Cells.Item($r,17).Text).Trim()
             }
@@ -358,7 +368,7 @@ function Ingest-Planes {
                 ImporteCuota    = ConvertTo-SqlDecimal $ws.Cells.Item($r,12).Value2
                 FechaVto        = ConvertTo-SqlDate    $ws.Cells.Item($r,13).Value2
                 Estado          = ([string]$ws.Cells.Item($r,14).Text).Trim()
-                Condicion       = ([string]$ws.Cells.Item($r,16).Text).Trim()
+                Condicion       = Get-Condicion $ws.Cells.Item($r,16) $ws.Cells.Item($r,13).Value2
                 Op              = ([string]$ws.Cells.Item($r,17).Text).Trim()
             }
         }
@@ -422,7 +432,7 @@ function Ingest-Impositivo {
                 Vencimiento   = ConvertTo-SqlDate $ws.Cells.Item($r, 6).Value2
                 Importe       = ConvertTo-SqlDecimal $imp
                 Estado        = ([string]$ws.Cells.Item($r, 8).Text).Trim()
-                Condicion     = ([string]$ws.Cells.Item($r, 9).Text).Trim()
+                Condicion     = Get-Condicion $ws.Cells.Item($r, 9) $ws.Cells.Item($r, 6).Value2
                 DiasMora      = [int]([string]$ws.Cells.Item($r,10).Text -replace '[^\d\-]', '' -replace '^$','0')
                 Registracion  = ([string]$ws.Cells.Item($r,11).Text).Trim()
                 Op            = ([string]$ws.Cells.Item($r,12).Text).Trim()
@@ -481,11 +491,22 @@ $hazImpositivo = -not $soloFlag -or $SoloImpositivo
 
 $resumen = @{ Bancos = $null; Tarjetas = $null; Prestamos = $null; Planes = $null; Impositivo = $null }
 
-if ($hazBancos)     { $resumen.Bancos     = Ingest-Bancos     -Path $PathBancos }
-if ($hazTarjetas)   { $resumen.Tarjetas   = Ingest-Tarjetas   -Path $PathTarjetas }
-if ($hazPrestamos)  { $resumen.Prestamos  = Ingest-Prestamos  -Path $PathPrestamos }
-if ($hazPlanes)     { $resumen.Planes     = Ingest-Planes     -Path $PathPlanes }
-if ($hazImpositivo) { $resumen.Impositivo = Ingest-Impositivo -Path $PathPlanes }
+$errores = @()
+# Cada Excel es independiente: si uno falla, los demas se cargan igual.
+function Invoke-Ingesta {
+    param([string]$Nombre, [scriptblock]$Bloque)
+    try { $resumen[$Nombre] = & $Bloque }
+    catch {
+        $script:errores += "${Nombre}: $($_.Exception.Message)"
+        Write-Warning "Ingesta $Nombre fallo: $($_.Exception.Message)"
+    }
+}
+
+if ($hazBancos)     { Invoke-Ingesta 'Bancos'     { Ingest-Bancos     -Path $PathBancos } }
+if ($hazTarjetas)   { Invoke-Ingesta 'Tarjetas'   { Ingest-Tarjetas   -Path $PathTarjetas } }
+if ($hazPrestamos)  { Invoke-Ingesta 'Prestamos'  { Ingest-Prestamos  -Path $PathPrestamos } }
+if ($hazPlanes)     { Invoke-Ingesta 'Planes'     { Ingest-Planes     -Path $PathPlanes } }
+if ($hazImpositivo) { Invoke-Ingesta 'Impositivo' { Ingest-Impositivo -Path $PathPlanes } }
 
 Write-Host "`n=== Resumen ingesta ===" -ForegroundColor Cyan
 if ($resumen.Bancos)     { Write-Host ("  Bancos:     {0} filas, fechas: {1}" -f $resumen.Bancos.Filas, ($resumen.Bancos.Fechas -join ', ')) }
@@ -493,4 +514,5 @@ if ($resumen.Tarjetas)   { Write-Host ("  Tarjetas:   {0} filas" -f $resumen.Tar
 if ($resumen.Prestamos)  { Write-Host ("  Prestamos:  {0} filas ({1} por vencer)" -f $resumen.Prestamos.Filas, $resumen.Prestamos.PorVencer) }
 if ($resumen.Planes)     { Write-Host ("  Planes:     {0} filas ({1} vig. por vencer, {2} caducos)" -f $resumen.Planes.Filas, $resumen.Planes.PorVencer, $resumen.Planes.Caducos) }
 if ($resumen.Impositivo) { Write-Host ("  Impositivo: {0} filas ({1} pendientes, `$ {2})" -f $resumen.Impositivo.Filas, $resumen.Impositivo.Pendientes, $resumen.Impositivo.ImportePendiente) }
+if ($errores.Count) { throw ("Ingesta incompleta:`n  " + ($errores -join "`n  ")) }
 Write-Host "OK" -ForegroundColor Green

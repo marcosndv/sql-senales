@@ -21,6 +21,9 @@ param(
 
     [int]$MaxRows = 0,
 
+    # Segundos; 0 = el commandTimeout de connection.json
+    [int]$CommandTimeout = 0,
+
     [switch]$ShowConnection
 )
 
@@ -77,7 +80,7 @@ try {
     $conn.Open()
     $cmd = $conn.CreateCommand()
     $cmd.CommandText = $Query
-    $cmd.CommandTimeout = [int]$cfg.commandTimeout
+    $cmd.CommandTimeout = if ($CommandTimeout -gt 0) { $CommandTimeout } else { [int]$cfg.commandTimeout }
 
     $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
     $ds = New-Object System.Data.DataSet

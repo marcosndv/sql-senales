@@ -17,7 +17,8 @@ $helper = Join-Path $root 'sql.ps1'
 
 function Invoke-SQL {
     param([string]$Query)
-    $raw = & $helper -Format Json $Query 2>&1 | Out-String
+    # 5 min por consulta: si algo se traba, falla y queda en el log en vez de pisar la corrida siguiente
+    $raw = & $helper -Format Json -CommandTimeout 300 $Query 2>&1 | Out-String
     if ($raw -match '^\s*(sql\.ps1|Exception|System\.Data)') { throw "SQL falló:`n$raw" }
     if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
     $obj = $raw | ConvertFrom-Json -ErrorAction Stop
@@ -28,7 +29,22 @@ function Invoke-SQL {
 
 if (-not $SkipIngesta) {
     Write-Host "► Corriendo ingesta Excel..." -ForegroundColor Cyan
-    & (Join-Path $PSScriptRoot 'ingesta_excel.ps1')
+    # Si falla un Excel (Drive sin sincronizar, archivo abierto) se sigue con lo que ya hay
+    # en dbo.Manual_*: el resto del dashboard (ERP, datapos) no debe quedar congelado.
+    try {
+        & (Join-Path $PSScriptRoot 'ingesta_excel.ps1')
+    } catch {
+        Write-Warning ("Ingesta Excel con errores, se exporta con los datos manuales previos: " + $_.Exception.Message)
+    }
+}
+
+# vw_CtaCte_Proveedores / vw_CtaCte_Clientes leen de un snapshot (sql\flujo_fondos\10_snapshot_ctacte.sql):
+# se recalcula una vez por corrida (~40 s) en vez de en cada una de las ~20 consultas que las usan.
+Write-Host "► Refrescando snapshot de cuentas corrientes..." -ForegroundColor Cyan
+try {
+    & $helper -Format List -CommandTimeout 900 -File (Join-Path $root 'sql\flujo_fondos\11_refresh_snap_ctacte.sql') | Out-String | Write-Host
+} catch {
+    Write-Warning ("No se pudo refrescar el snapshot de cuentas corrientes, se exporta con el anterior: " + $_.Exception.Message)
 }
 
 Write-Host "► Consultando vistas..." -ForegroundColor Cyan
