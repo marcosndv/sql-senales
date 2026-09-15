@@ -84,6 +84,73 @@ function filterByEmpresa(rows, key) {
   });
 }
 
+function sameEmpresa(a, b) {
+  return String(a || '').toLowerCase() === String(b || '').toLowerCase();
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Dropdown propio (no <select> nativo, que en Windows abre la lista del sistema fuera de estilo).
+// Los listeners van por delegación sobre el contenedor, que se crea una sola vez.
+function wireEmpresaFilter(box) {
+  const panel = () => box.querySelector('.empresa-panel');
+  const trigger = () => box.querySelector('.empresa-trigger');
+  const close = () => {
+    if (panel()) panel().hidden = true;
+    if (trigger()) trigger().setAttribute('aria-expanded', 'false');
+  };
+  const filterOptions = q => {
+    const n = q.trim().toLowerCase();
+    panel().querySelectorAll('li[data-id]').forEach(li => {
+      li.hidden = n !== '' && li.dataset.id !== '' && !li.textContent.toLowerCase().includes(n);
+    });
+  };
+  box.addEventListener('click', e => {
+    if (e.target.closest('.empresa-trigger')) {
+      const opening = panel().hidden;
+      panel().hidden = !opening;
+      trigger().setAttribute('aria-expanded', String(opening));
+      if (opening) {
+        const search = panel().querySelector('.empresa-search');
+        search.value = '';
+        filterOptions('');
+        search.focus();
+        panel().querySelector('li.selected')?.scrollIntoView({block: 'nearest'});
+      }
+      return;
+    }
+    const li = e.target.closest('li[data-id]');
+    if (li) { close(); setSelectedEmpresa(li.dataset.id); }
+  });
+  box.addEventListener('input', e => {
+    if (e.target.matches('.empresa-search')) filterOptions(e.target.value);
+  });
+  box.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { close(); trigger()?.focus(); }
+    if (e.key === 'Enter' && e.target.matches('.empresa-search')) {
+      const first = panel().querySelector('li[data-id]:not([hidden])');
+      if (first) { close(); setSelectedEmpresa(first.dataset.id); }
+    }
+  });
+  document.addEventListener('click', e => { if (!box.contains(e.target)) close(); });
+}
+
+// Chip "Filtrando: X" bajo el título de la página, con botón para quitar el filtro.
+function renderFilterChip(label) {
+  const host = document.querySelector('header.page-header > div');
+  let chip = document.querySelector('.filter-chip');
+  if (!label || !host) { if (chip) chip.remove(); return; }
+  if (!chip) {
+    chip = document.createElement('div');
+    chip.className = 'filter-chip';
+    chip.addEventListener('click', e => { if (e.target.closest('button')) setSelectedEmpresa(''); });
+    host.appendChild(chip);
+  }
+  chip.innerHTML = `Filtrando <b>${escapeHtml(label)}</b><button type="button" aria-label="Quitar filtro de empresa">×</button>`;
+}
+
 // -------- Sidebar ----------
 // counters: acepta el objeto DATA.counters completo tal como viene del backend.
 // Las páginas pasan sus keys tal cual (ver COUNTER_KEY_MAP).
@@ -112,6 +179,8 @@ function deriveEmpresasFromData(data) {
   return Array.from(m.values());
 }
 
+// Las páginas llaman a renderSidebar() en cada cambio de empresa: el sidebar y el layout
+// se crean una sola vez y después solo se actualizan filtro, badges y chip del header.
 function renderSidebar(counters, empresas) {
   const active = document.body.dataset.page || '';
   let currentGroup = null;
@@ -126,7 +195,7 @@ function renderSidebar(counters, empresas) {
     }
     return link;
   }).join('');
-  // Dropdown de empresa (filtro global). "Todas" = sin filtro.
+  // Filtro global de empresa. "Todas" = sin filtro.
   // `empresas` puede ser: un array (lista explícita), o el DATA completo (deriva de las tablas).
   const sel = getSelectedEmpresa();
   let empSource;
@@ -136,36 +205,50 @@ function renderSidebar(counters, empresas) {
   if (!empSource || empSource.length === 0) empSource = deriveEmpresasFromData(window.DATA);
   const empList = (empSource || []).slice().sort((a,b) =>
     (a.NombreEmpresa||a.EmpresaId||'').localeCompare(b.NombreEmpresa||b.EmpresaId||'', 'es-AR'));
-  const opts = ['<option value="">Todas las empresas</option>']
-    .concat(empList.map(e => `<option value="${e.EmpresaId}"${e.EmpresaId===sel?' selected':''}>${e.NombreEmpresa || e.EmpresaId}</option>`))
-    .join('');
-  const dropdown = `
-    <div class="empresa-filter">
-      <label for="empresaSelect">Empresa</label>
-      <select id="empresaSelect">${opts}</select>
+  const selEmp = empList.find(e => sameEmpresa(e.EmpresaId, sel));
+  const selLabel = sel ? (selEmp ? (selEmp.NombreEmpresa || selEmp.EmpresaId) : sel) : 'Todas las empresas';
+  const options = [{EmpresaId: '', NombreEmpresa: 'Todas las empresas'}].concat(empList).map(e => {
+    const isSel = sel ? sameEmpresa(e.EmpresaId, sel) : e.EmpresaId === '';
+    return `<li role="option" data-id="${escapeHtml(e.EmpresaId)}" aria-selected="${isSel}" class="${isSel ? 'selected' : ''}">${escapeHtml(e.NombreEmpresa || e.EmpresaId)}</li>`;
+  }).join('');
+  const filterHtml = `
+    <span class="empresa-filter-label" id="empresaFilterLabel">Empresa</span>
+    <button type="button" class="empresa-trigger${sel ? ' filtered' : ''}" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="empresaFilterLabel">
+      <span class="empresa-trigger-text">${escapeHtml(selLabel)}</span>
+      <svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="empresa-panel" hidden>
+      <input type="search" class="empresa-search" placeholder="Buscar empresa…" aria-label="Buscar empresa" autocomplete="off">
+      <ul role="listbox">${options}</ul>
     </div>`;
-  const sidebar = document.createElement('aside');
-  sidebar.className = 'sidebar';
-  sidebar.innerHTML = `
-    <div class="brand">
-      <h2>Flujo Fondos</h2>
-      <div class="sub">Señales · Grupo</div>
-    </div>
-    ${dropdown}
-    <nav>${nav}</nav>
-  `;
-  document.body.prepend(sidebar);
-  const sel$ = sidebar.querySelector('#empresaSelect');
-  if (sel$) sel$.addEventListener('change', e => setSelectedEmpresa(e.target.value));
-  // Envolver el resto en .app
-  const rest = document.querySelector('main.content');
-  if (rest) {
-    const wrap = document.createElement('div');
-    wrap.className = 'app';
-    document.body.insertBefore(wrap, sidebar);
-    wrap.appendChild(sidebar);
-    wrap.appendChild(rest);
+
+  let sidebar = document.querySelector('aside.sidebar');
+  if (!sidebar) {
+    sidebar = document.createElement('aside');
+    sidebar.className = 'sidebar';
+    sidebar.innerHTML = `
+      <div class="brand">
+        <h2>Flujo Fondos</h2>
+        <div class="sub">Señales · Grupo</div>
+      </div>
+      <div class="empresa-filter"></div>
+      <nav></nav>
+    `;
+    document.body.prepend(sidebar);
+    // Envolver el resto en .app
+    const rest = document.querySelector('main.content');
+    if (rest) {
+      const wrap = document.createElement('div');
+      wrap.className = 'app';
+      document.body.insertBefore(wrap, sidebar);
+      wrap.appendChild(sidebar);
+      wrap.appendChild(rest);
+    }
+    wireEmpresaFilter(sidebar.querySelector('.empresa-filter'));
   }
+  sidebar.querySelector('.empresa-filter').innerHTML = filterHtml;
+  sidebar.querySelector('nav').innerHTML = nav;
+  renderFilterChip(sel ? selLabel : '');
   // Leyenda de unidades bajo el header (una vez)
   const updated = document.querySelector('.updated');
   if (updated && !document.querySelector('.unit-legend')) {
@@ -216,12 +299,10 @@ function fetchPageData(cb) {
 //   - agregados (totales, porEmpresa, topN, ...) recomputados desde esos raw rows
 // Si no hay empresa seleccionada devuelve el original tal cual.
 // Recomputa agregados desde raw rows para el filtro por empresa del sidebar.
-// Limitaciones conocidas (agregados globales sin dimension Empresa a nivel SQL):
-//   - proyeccionPorDia / proyeccion30d del inicio (SUM por día, sin Empresa)
-//   - porMes de deuda-global (SUM por mes, sin Empresa)
-//   - mensual del consolidado (Cobros/PagosPorPeriodo agrupan por Empresa pero el
-//     merge inicial no expone la dimensión — queda global hasta refactor SQL)
-// Estos KPIs siguen mostrando datos globales incluso con filtro aplicado.
+// Agregados que la página usa sin dimensión Empresa (proyección del inicio, porMes de deuda
+// global, mensual del consolidado) se recalculan desde las versiones con Empresa que manda
+// export_data.ps1 (proyeccionPorDia con EmpresaId, porMesEmpresa, mensualPorEmpresa).
+// Con un JSON viejo que no las trae, esos agregados quedan globales.
 function buildFilteredData(raw) {
   const sel = getSelectedEmpresa();
   if (!sel || !raw) return raw;
@@ -391,7 +472,7 @@ function buildFilteredData(raw) {
     });
     out.porOrigen = Array.from(orig.values()).sort((a,b)=>b.TotalImporte-a.TotalImporte);
   } else if (page === 'impositivo') {
-    const detalle = filt(raw.detalle, 'EmpresaExcel');
+    const detalle = filt(raw.detalle);
     out.detalle = detalle;
     const today = new Date().toISOString().slice(0,10);
     const venc = detalle.filter(d => d.FechaVencimiento < today);
@@ -429,16 +510,41 @@ function buildFilteredData(raw) {
       {Origen:'Préstamos', Cant:0, Total: one.Prestamos || 0, Vencido:0, Prox30:0},
       {Origen:'Planes ARCA', Cant:0, Total: one.PlanesArca || 0, Vencido:0, Prox30:0},
     ].filter(x => x.Total > 0) : [];
+    if (raw.porMesEmpresa) {
+      const meses = new Map();
+      filt(raw.porMesEmpresa).forEach(r => {
+        const k = r.Periodo + '|' + r.Origen;
+        const cur = meses.get(k) || {Periodo: r.Periodo, Origen: r.Origen, Total: 0};
+        cur.Total += (+r.Total || 0);
+        meses.set(k, cur);
+      });
+      out.porMes = Array.from(meses.values());
+    }
   } else if (page === 'consolidado') {
     out.porEmpresa = (raw.porEmpresa || []).filter(e => same(e.EmpresaId));
     const one = out.porEmpresa[0];
-    if (one) {
-      out.totalesAno = Object.assign({}, raw.totalesAno, {
-        IngresosAno: one.Ingresos, EgresosAno: one.Egresos,
+    out.totalesAno = Object.assign({}, raw.totalesAno, {
+      IngresosAno: one ? one.Ingresos : 0,
+      EgresosAno:  one ? one.Egresos  : 0,
+    });
+    if (raw.mensualPorEmpresa) {
+      const meses = new Map();
+      filt(raw.mensualPorEmpresa).forEach(r => {
+        const k = r.Periodo + '|' + r.EsProyectado;
+        const cur = meses.get(k) || {Periodo: r.Periodo, Ingresos: 0, Egresos: 0, Neto: 0, EsProyectado: r.EsProyectado};
+        cur.Ingresos += (+r.Ingresos || 0);
+        cur.Egresos  += (+r.Egresos  || 0);
+        cur.Neto = cur.Ingresos - cur.Egresos;
+        meses.set(k, cur);
       });
+      out.mensual = Array.from(meses.values())
+        .sort((a, b) => a.Periodo.localeCompare(b.Periodo) || (+a.EsProyectado) - (+b.EsProyectado));
+      const hoy = new Date();
+      const mesActual = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0');
+      const actual = out.mensual.find(r => r.Periodo === mesActual && !+r.EsProyectado);
+      out.totalesAno.IngresosMes = actual ? actual.Ingresos : 0;
+      out.totalesAno.EgresosMes  = actual ? actual.Egresos  : 0;
     }
-    // mensual: no se puede recomputar sin raw rows (los agregados vienen del SQL sin dimension Empresa)
-    // Por ahora dejamos mensual global. TODO: agregar Empresa a vw_CobrosPorPeriodo/vw_PagosPorPeriodo.
   } else if (page === 'inicio') {
     const cuentas = filt(raw.posicionCuentas);
     out.posicionCuentas = cuentas;
@@ -462,7 +568,26 @@ function buildFilteredData(raw) {
       banco.set(c.Banco, cur);
     });
     out.posicionPorBanco = Array.from(banco.values()).sort((a,b)=>b.Disponible-a.Disponible);
-    // proyeccion30d + proyeccionPorDia: no se pueden recomputar sin raw rows con Empresa.
+    // Proyección semanal y KPIs de 30 días: desde proyeccionPorDia con EmpresaId (mismo criterio
+    // que el SQL de proyeccion30d: no vencidos con fecha hasta hoy + 30 días).
+    if ((raw.proyeccionPorDia || []).some(p => p.EmpresaId !== undefined)) {
+      const proy = filt(raw.proyeccionPorDia);
+      out.proyeccionPorDia = proy;
+      const lim = new Date(); lim.setDate(lim.getDate() + 30);
+      const limite = lim.getFullYear() + '-' + String(lim.getMonth() + 1).padStart(2, '0') + '-' + String(lim.getDate()).padStart(2, '0');
+      const futuros = proy.filter(p => !+p.EsVencido && p.Fecha <= limite);
+      const suma = (tipo, campo) => futuros.filter(p => p.Tipo === tipo).reduce((s, p) => s + (+p[campo] || 0), 0);
+      const entradas = suma('ENTRADA', 'Importe');
+      const salidas  = suma('SALIDA', 'Importe');
+      out.proyeccion30d = Object.assign({}, raw.proyeccion30d, {
+        entradas, salidas,
+        movEnt: suma('ENTRADA', 'Movimientos'),
+        movSal: suma('SALIDA', 'Movimientos'),
+        neto: entradas - salidas,
+      });
+    }
+    // Las cuentas sin mapear no pertenecen a ninguna empresa: no aplican con filtro.
+    out.sinEmpresa = [];
   }
 
   return out;

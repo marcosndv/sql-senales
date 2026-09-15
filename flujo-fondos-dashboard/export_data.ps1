@@ -103,10 +103,10 @@ ORDER BY Empresa, Banco, Cuenta
 "@
 
 $proyeccionPorDia = Invoke-SQL @"
-SELECT CONVERT(varchar(10), Fecha, 120) AS Fecha, EsVencido, Origen, Tipo,
+SELECT CONVERT(varchar(10), Fecha, 120) AS Fecha, EsVencido, Origen, Tipo, Empresa AS EmpresaId,
        SUM(Importe) AS Importe, SUM(ImporteFirmado) AS ImporteFirmado, COUNT(*) AS Movimientos
 FROM vw_FlujoFondos_Proyectado
-GROUP BY CONVERT(varchar(10), Fecha, 120), EsVencido, Origen, Tipo
+GROUP BY CONVERT(varchar(10), Fecha, 120), EsVencido, Origen, Tipo, Empresa
 "@
 
 # Proyección próximos 30 días
@@ -623,12 +623,27 @@ GROUP BY CASE WHEN EsVencida=1 THEN 'Vencido' ELSE FORMAT(FechaVto, 'yyyy-MM') E
 ORDER BY Periodo, Origen
 "@
 
+# Mismo corte con dimensión Empresa, para el filtro de empresa del sidebar (el gráfico usa porMes)
+$dgPorMesEmpresa = Invoke-SQL @"
+SELECT
+    CASE WHEN EsVencida=1 THEN 'Vencido'
+         ELSE FORMAT(FechaVto, 'yyyy-MM') END AS Periodo,
+    Origen,
+    Empresa AS EmpresaId,
+    SUM(Deuda) AS Total
+FROM vw_FlujoFondos_DeudaGlobal
+WHERE EsVencida=1
+   OR FechaVto <= DATEADD(month, 12, CAST(GETDATE() AS DATE))
+GROUP BY CASE WHEN EsVencida=1 THEN 'Vencido' ELSE FORMAT(FechaVto, 'yyyy-MM') END, Origen, Empresa
+"@
+
 $dataDeudaGlobal = [ordered]@{
     lastUpdated  = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
     totales      = $dgTotales
     porOrigen    = $dgPorOrigen
     porEmpresa   = $dgPorEmpresa
     porMes       = $dgPorMes
+    porMesEmpresa = $dgPorMesEmpresa
     counters     = $sidebarCounters
     empresas     = $empresas
 }
@@ -681,6 +696,44 @@ $conMensual = @()
 if ($conMensualHist) { $conMensual += $conMensualHist }
 if ($conMensualProy) { $conMensual += $conMensualProy }
 
+# Mismo mensual con dimensión Empresa, para el filtro de empresa del sidebar (el gráfico usa mensual)
+$conMensualEmpresaHist = Invoke-SQL @"
+WITH Ing AS (
+    SELECT Empresa, Periodo, SUM(TotalCobrado) AS Ingresos
+    FROM vw_CobrosPorPeriodo
+    WHERE TipoBase='OFICIAL' AND Anio*12+Mes >= (YEAR(GETDATE())*12+MONTH(GETDATE())-23)
+    GROUP BY Empresa, Periodo
+),
+Egr AS (
+    SELECT Empresa, Periodo, SUM(TotalPagado) AS Egresos
+    FROM vw_PagosPorPeriodo
+    WHERE TipoBase='OFICIAL' AND Anio*12+Mes >= (YEAR(GETDATE())*12+MONTH(GETDATE())-23)
+    GROUP BY Empresa, Periodo
+)
+SELECT COALESCE(i.Empresa, e.Empresa) AS EmpresaId,
+       COALESCE(i.Periodo, e.Periodo) AS Periodo,
+       ISNULL(i.Ingresos, 0) AS Ingresos,
+       ISNULL(e.Egresos, 0)  AS Egresos,
+       0 AS EsProyectado
+FROM Ing i FULL OUTER JOIN Egr e ON e.Periodo = i.Periodo AND e.Empresa = i.Empresa
+"@
+
+$conMensualEmpresaProy = Invoke-SQL @"
+SELECT Empresa AS EmpresaId,
+       FORMAT(Fecha, 'yyyy-MM') AS Periodo,
+       SUM(CASE WHEN Tipo='ENTRADA' THEN Importe ELSE 0 END) AS Ingresos,
+       SUM(CASE WHEN Tipo='SALIDA'  THEN Importe ELSE 0 END) AS Egresos,
+       1 AS EsProyectado
+FROM vw_FlujoFondos_Proyectado
+WHERE Fecha > EOMONTH(GETDATE())
+  AND Fecha <= EOMONTH(GETDATE(), 6)
+GROUP BY Empresa, FORMAT(Fecha, 'yyyy-MM')
+"@
+
+$conMensualEmpresa = @()
+if ($conMensualEmpresaHist) { $conMensualEmpresa += $conMensualEmpresaHist }
+if ($conMensualEmpresaProy) { $conMensualEmpresa += $conMensualEmpresaProy }
+
 # Año en curso: por empresa (top ingresos y top egresos)
 $conAnoPorEmpresa = Invoke-SQL @"
 WITH Ing AS (
@@ -716,6 +769,7 @@ $dataConsolidado = [ordered]@{
     lastUpdated  = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
     totalesAno   = $conTotalesAno
     mensual      = $conMensual
+    mensualPorEmpresa = $conMensualEmpresa
     porEmpresa   = $conAnoPorEmpresa
     counters     = $sidebarCounters
     empresas     = $empresas
@@ -755,7 +809,7 @@ ORDER BY Total DESC
 "@
 
 $impDetalle = Invoke-SQL @"
-SELECT i.EmpresaExcel, i.NombreEmpresa,
+SELECT i.Empresa AS EmpresaId, i.EmpresaExcel, i.NombreEmpresa,
        i.Grupo, i.Concepto, i.Subconcepto,
        CONVERT(varchar(10), i.Periodo, 120) AS Periodo,
        CONVERT(varchar(10), i.FechaVencimiento, 120) AS FechaVencimiento,

@@ -34,11 +34,29 @@ aside.sidebar{background:var(--sidebar-bg);color:var(--sidebar-fg);padding:28px 
 aside.sidebar .brand{padding:0 24px 22px;border-bottom:1px solid var(--sidebar-hover);margin-bottom:16px}
 aside.sidebar .brand h2{margin:0;color:var(--sidebar-fg-hi);font-family:'Playfair Display',Georgia,serif;font-size:20px;font-weight:600;letter-spacing:-.01em;text-transform:none}
 aside.sidebar .brand .sub{font-size:10px;color:#7a9689;margin-top:4px;text-transform:uppercase;letter-spacing:.18em;font-weight:600}
-aside.sidebar .empresa-filter{padding:0 24px 18px;border-bottom:1px solid var(--sidebar-hover);margin-bottom:12px}
-aside.sidebar .empresa-filter label{display:block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#7a9689;margin-bottom:6px}
-aside.sidebar .empresa-filter select{width:100%;padding:8px 10px;border-radius:var(--radius-pill);border:1px solid var(--sidebar-hover);background:var(--sidebar-hover);color:var(--sidebar-fg-hi);font-size:12px;font-weight:500;font-family:inherit;cursor:pointer;outline:none;transition:border-color .12s}
-aside.sidebar .empresa-filter select:hover,aside.sidebar .empresa-filter select:focus{border-color:var(--accent)}
-aside.sidebar .empresa-filter select option{background:var(--sidebar-bg);color:var(--sidebar-fg-hi)}
+aside.sidebar .empresa-filter{position:relative;padding:0 24px 18px;border-bottom:1px solid var(--sidebar-hover);margin-bottom:12px}
+aside.sidebar .empresa-filter-label{display:block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#7a9689;margin-bottom:6px}
+aside.sidebar .empresa-trigger{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px 8px 14px;border-radius:var(--radius-pill);border:1px solid var(--sidebar-hover);background:var(--sidebar-hover);color:var(--sidebar-fg-hi);font-family:inherit;font-size:12px;font-weight:500;text-align:left;cursor:pointer;outline:none;transition:border-color .12s,background .12s,color .12s}
+aside.sidebar .empresa-trigger:hover,aside.sidebar .empresa-trigger:focus-visible,aside.sidebar .empresa-trigger[aria-expanded="true"]{border-color:var(--accent)}
+aside.sidebar .empresa-trigger.filtered{background:var(--sidebar-fg-hi);border-color:var(--sidebar-fg-hi);color:var(--sidebar-bg);font-weight:600}
+aside.sidebar .empresa-trigger-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+aside.sidebar .empresa-trigger .chev{width:12px;height:12px;flex:none;transition:transform .15s}
+aside.sidebar .empresa-trigger[aria-expanded="true"] .chev{transform:rotate(180deg)}
+aside.sidebar .empresa-panel{position:absolute;left:12px;right:12px;top:calc(100% - 12px);z-index:20;background:var(--sidebar-bg);border:1px solid var(--sidebar-hover);border-radius:var(--radius);padding:8px;box-shadow:0 14px 30px rgba(0,0,0,.35)}
+aside.sidebar .empresa-search{width:100%;margin-bottom:6px;padding:7px 12px;border-radius:var(--radius-pill);border:1px solid var(--sidebar-hover);background:var(--sidebar-hover);color:var(--sidebar-fg-hi);font-family:inherit;font-size:12px;outline:none}
+aside.sidebar .empresa-search::placeholder{color:#7a9689}
+aside.sidebar .empresa-search:focus{border-color:var(--accent)}
+aside.sidebar .empresa-panel ul{list-style:none;margin:0;padding:0;max-height:320px;overflow-y:auto}
+aside.sidebar .empresa-panel li{padding:8px 12px;border-radius:var(--radius-pill);font-size:12px;font-weight:500;color:#a6b8ae;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .12s,color .12s}
+aside.sidebar .empresa-panel li:hover{background:var(--sidebar-hover);color:var(--sidebar-fg-hi)}
+aside.sidebar .empresa-panel li.selected{background:var(--sidebar-fg-hi);color:var(--sidebar-bg);font-weight:600}
+aside.sidebar .empresa-panel li[hidden]{display:none}
+
+/* Chip de filtro activo bajo el título */
+.filter-chip{display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:4px 5px 4px 12px;border:1px solid var(--accent);border-radius:var(--radius-pill);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--accent)}
+.filter-chip b{color:var(--text);font-weight:700;letter-spacing:.06em}
+.filter-chip button{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:none;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;line-height:1;cursor:pointer}
+.filter-chip button:hover{background:var(--accent-2)}
 aside.sidebar nav{display:flex;flex-direction:column;gap:2px;padding:0 12px}
 aside.sidebar nav a{padding:10px 14px;border-radius:var(--radius-pill);font-size:12px;font-weight:500;color:#a6b8ae;display:flex;align-items:center;gap:12px;letter-spacing:.02em;transition:background .12s, color .12s}
 aside.sidebar nav a:hover{background:var(--sidebar-hover);color:var(--sidebar-fg-hi)}

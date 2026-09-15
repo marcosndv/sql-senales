@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "flujo-fondos",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["flujo-fondos-dashboard/server.js"],
+      "port": 8089
+    }
+  ]
+}
